@@ -1,6 +1,4 @@
-import {getI18nValue} from  "/lang/i18n"
-
-
+import {getI18nValue} from  "./lang/i18n"
 
 //配置文件
 var config={
