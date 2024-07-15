@@ -1,0 +1,1 @@
+Designed specifically for rendering trajectories of GPS points reported by devices. Optimize GPS coordinate trajectory. Calculate stop points, stay time, exercise time, mileage and other information
