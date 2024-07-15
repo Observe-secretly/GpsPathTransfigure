@@ -1,0 +1,29 @@
+{
+  "name": "gpspathtransfigure",
+  "version": "0.0.2",
+  "description": "Designed specifically for rendering trajectories of GPS points reported by devices. Optimize GPS coordinate trajectory. Calculate stop points, stay time, exercise time, mileage and other information.",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/Observe-secretly/GpsPathTransfigure.git"
+  },
+  "author": "LiMin",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Observe-secretly/GpsPathTransfigure/issues"
+  },
+  "homepage": "https://github.com/Observe-secretly/GpsPathTransfigure#readme",
+  "dependencies": {},
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.5",
+    "vite": "^5.3.1",
+    "@amap/amap-jsapi-loader": "^1.0.1",
+    "vue": "^3.4.29"
+  }
+}
