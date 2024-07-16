@@ -102,7 +102,7 @@ function optimize(gpsPoints) {
 
       const centerPoint = calculateGeographicalCenter(staticPointsSequence);
       finalPoints.push(centerPoint); // 将中心点加入结果数组
-      stopPoints.push(centerPoint);
+      stopPoints.push(centerPoint);// 将中心点加入到停留点数组中
       i = staticEndIndex; // 跳到静止状态结束的点继续处理
     } else {
       finalPoints.push(gpsPoints[i]); // 非静止状态点，直接加入结果数组
@@ -152,14 +152,14 @@ function calculateGeographicalCenter(points) {
     const latAvg = Math.atan2(zAvg, hyp);
 
     return {
-        lat: radiansToDegrees(latAvg),
-        lon: radiansToDegrees(lonAvg),
-        currentTime:points[points.length-1].currentTime,
-        startPosition:points[0],
-        endPosition:points[points.length-1],
-        startTime:points[0].currentTime,
-        endTime:points[points.length-1].currentTime,
-        stopTimeSeconds:calculateMilliseconds(points[0].currentTime,points[points.length-1].currentTime)
+        lat: radiansToDegrees(latAvg),//纬度
+        lon: radiansToDegrees(lonAvg),//经度
+        currentTime:points[points.length-1].currentTime,//GPS点上报时间
+        startPosition:points[0],//开始停留时的GPS点
+        endPosition:points[points.length-1],//结束停留时的GPS点
+        startTime:points[0].currentTime,//停留开始时间
+        endTime:points[points.length-1].currentTime,//结束停留时间
+        stopTimeSeconds:calculateMilliseconds(points[0].currentTime,points[points.length-1].currentTime)//停留时间
     };
 }
 
