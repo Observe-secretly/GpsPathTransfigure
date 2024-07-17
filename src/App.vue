@@ -13,7 +13,7 @@
 
 
     try {
-        let response = await fetch('/src/json/proximityStopMergeTest.json');
+        let response = await fetch('/src/json/stopPointSmoothnessTest.json');
         let data = await response.json();
         antResults = data; // 将 JSON 数据赋值给 antResults 数组
 
@@ -26,9 +26,11 @@
         }
 
         GpsPathTransfigure.conf({
-          locale:'zh'
+          locale:'zh',
+          
+          stopPointSmoothness:true
         })
-        const staticPoints = GpsPathTransfigure.optimize(pathParam);
+        const staticPoints = await GpsPathTransfigure.optimize(pathParam);
         const finalPoints = staticPoints.finalPoints
         const stopPoints = staticPoints.stopPoints
 
@@ -36,7 +38,7 @@
         var map = new AMap.Map('container', {
               resizeEnable: true,
           center:[pathParam[0].lon,pathParam[0].lat],
-          zoom:15
+          zoom:18
         });
 
 

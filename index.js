@@ -7,7 +7,11 @@ var config={
     distanceThreshold : 35, // 距离阈值，单位为米
     stationaryEndPoints : 10, // 判断静止状态结束的连续点数
     proximityStopThreshold:35,// 近距离停留点阈值。此值通常要大于等于distanceThreshold
-    proximityStopMerge:false,// 近距离停留点合并。建议默认开启
+    proximityStopMerge:true,// 近距离停留点合并。建议默认开启
+    stopPointSmoothness:true,//是否开启停留点前后点位的平滑过度。你必须配置对应的地图密钥。否则无效。开启此项会额外消耗移动端流量，并且轨迹渲染速度也会降低
+    amapKey:'',// 配置高德地图可以调用jsapi路线规划的密钥
+    googleMapKey:'',// 配置google地图密钥
+    defaultMapService:'',// 默认地图服务。枚举值【amap】【gmap】。不配置则默认语言是zh时使用amap。其它语言都适用googleMap
     format : true,//是否格式化数据内容。如里程、时间信息。若开启则根据locale配置输出对应国家语言的信息的内容
     locale : 'zh'//设置语言
 }
@@ -57,7 +61,7 @@ function formatDistance(meters) {
  * @param {*} gpsPoints 
  * @returns 
  */
-function optimize(gpsPoints) {
+async function optimize(gpsPoints) {
   var finalPoints = []; // 存储最终的轨迹点
 
   let N=config.minComparisonPoints 
@@ -115,12 +119,188 @@ function optimize(gpsPoints) {
     finalPoints  = proximityStopMerge(finalPoints)
   }
   
+  //把停留点从坐标中单独提出来
+  let stopPoints = []
+  stopPoints = dismantleStopPoint(finalPoints)
+
+  // 停留点前后点位的平滑过度
+  if(config.stopPointSmoothness){
+    finalPoints = await stopPointSmoothness(finalPoints)
+  }
 
   // 返回处理后的轨迹点数组
   return {
     "finalPoints": finalPoints,
-    "stopPoints":dismantleStopPoint(finalPoints),
+    "stopPoints" : stopPoints,
   }; 
+}
+
+/**
+ * 停留点平滑过度。使用地图服务提供的功能，对停留点和真实点之间进行道路吸附补点衔接
+ * @param {*} points 
+ */
+async function stopPointSmoothness(points){
+  let mapService = config.defaultMapService;
+  if(mapService){
+    switch (mapService) {
+      case 'amap':
+         mapService = 'amap'
+        break;
+      case 'gmap':
+        mapService = 'gmap'
+        break;
+      default:
+        mapService = ''
+        break;
+    }
+  }
+  
+  if(!mapService){
+    //根据语言进行选择
+    if(config.locale == 'zh'){
+      mapService = 'amap'
+    }else{
+      mapService = 'gmap'
+    }
+  }
+
+  //判定对应的map是否有配置密钥
+  if(mapService =='amap'&&!config.amapKey){
+    return points
+  }else if(mapService =='gmap'&&!config.googleMapKey){
+    return points
+  }
+
+  return await smoothnessOptimize(points,mapService)
+     
+}
+
+/**
+ * 平滑处理
+ * @param {*} points 
+ * @param {*} mapService 
+ */
+async function smoothnessOptimize(points,mapService){
+  let resultPoints = []
+
+  //停留点上一个点
+  let lastPoint = undefined
+  //停留点
+  let stopPoint = undefined
+  //停留点上一个点
+  let nextPoint = undefined
+
+  for (let index = 0; index < points.length; index++) {
+    let item = points[index]
+    resultPoints.push(item)
+
+    if(stopPoint){
+      nextPoint = item
+      lastPoint = item
+      //调用对应的地图服务进行轨迹优化补点
+      let locus1Promise = mapServicePlan(lastPoint,stopPoint,mapService)
+      let locus2Promise = mapServicePlan(stopPoint,nextPoint,mapService)
+
+      const [locus1Result, locus2Result] = await Promise.all([locus1Promise, locus2Promise]);
+
+      //在原有轨迹中删除lastPoint、stopPoint、nextPoint。把locus1、locus2追加进去
+      resultPoints.splice(-3);
+      resultPoints = [...resultPoints,...locus1Result,...locus2Result]
+
+
+      //清空stopPoint和nextPoint
+      stopPoint = undefined
+      nextPoint = undefined
+
+    }
+
+    if(item.stopTimeSeconds){
+      //记录停留点
+      stopPoint = item
+
+      if(index  == points.length - 1){
+        //停留点是最后一个点。此时没有nextPoint。
+        //调用对应的地图服务进行轨迹优化
+        let locusResult = await mapServicePlan(lastPoint,stopPoint,mapService)
+        //在原有轨迹中删除lastPoint、stopPoint。把locus1追加到末尾
+        resultPoints.splice(-2);
+        resultPoints = [...resultPoints,...locusResult]
+      }else{
+        continue
+      }
+      
+    }
+
+    //刷新上个点
+    lastPoint = item
+  }
+
+  console.log(resultPoints)
+  return resultPoints;
+
+}
+
+/**
+ * 根据给定的gps坐标起始点，调用不同的地图服务进行路径规划补点
+ * @param {*} startPoint 
+ * @param {*} endPoint 
+ * @param {*} mapService 
+ */
+async function mapServicePlan(startPoint,endPoint,mapService){
+  switch (mapService) {
+    case 'amap':
+      return amapServicePlan(startPoint,endPoint)
+      break;
+    case 'gmap':
+      return gmapServicePlan(startPoint,endPoint)
+      break;
+  }
+
+}
+
+async function amapServicePlan(startPoint, endPoint) {
+  try {
+    const response = await fetch(`https://restapi.amap.com/v3/direction/walking?key=${config.amapKey}&origin=${startPoint.lon},${startPoint.lat}&destination=${endPoint.lon},${endPoint.lat}`);
+    const data = await response.json();
+    if (data.status === '1') { // 成功
+      const paths = data.route.paths;
+      if (paths.length > 0) {
+        let resultPoints = [];
+        const steps = paths[0].steps;
+        steps.forEach(step => {
+          resultPoints = resultPoints.concat(convertAmapGPSToObjects(step.polyline,startPoint.currentTime));
+        });
+        return resultPoints;
+      }
+    } else {
+      throw new Error('Amap service failed');
+    }
+  } catch (error) {
+    console.error('amapServicePlan Error:', error);
+    throw error;
+  }
+}
+
+/**
+ * 把amap返回的GPS坐标点序列字符串，转换成{ lon, lat }格式
+ * @param {*} gpsString 
+ * @returns 
+ */
+function convertAmapGPSToObjects(gpsString,currentTime) {
+  // 分割字符串成经纬度对的数组
+  const coordsArray = gpsString.split(';');
+  
+  // 处理每一对经纬度，将其转换成对象格式
+  const result = coordsArray.map(coord => {
+    const [lon, lat] = coord.split(',').map(Number);
+    return { lon:lon, lat:lat ,currentTime:currentTime,type:'sys'};
+  });
+
+  return result;
+}
+
+function gmapServicePlan(startPoint,endPoint){
+
 }
 
 /**
@@ -175,9 +355,8 @@ function proximityStopMerge(points){
         }
         
     }
-      
-      
-      i++;
+    
+    i++;
   }
 
   return processedPoints;
@@ -215,6 +394,7 @@ function calculateGeographicalCenter(points) {
     const hyp = Math.sqrt(xAvg * xAvg + yAvg * yAvg);
     const latAvg = Math.atan2(zAvg, hyp);
 
+    //这里一定要注意startPosition和endPosition是停止GPS序列的第一个和最后一个。他们并不会出现在轨迹上。所以不代表停留点在轨迹上的上一个和下一个点
     return {
         lat: radiansToDegrees(latAvg),//纬度
         lon: radiansToDegrees(lonAvg),//经度
