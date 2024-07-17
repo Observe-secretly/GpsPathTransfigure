@@ -44,7 +44,7 @@ GpsPathTransfigure.conf({
     distanceThresholdPercentage : 90, // 距离阈值内的点的百分比
     distanceThreshold : 35, // 距离阈值，单位为米
     stationaryEndPoints : 10, // 判断静止状态结束的连续点数
-    proximityStopThreshold:35,// 近距离停留点阈值。此值通常要大于等于
+    proximityStopThreshold:35,// 近距离停留点阈值。此值通常要大于等于distanceThreshold
     proximityStopMerge:false,// 近距离停留点合并。建议默认开启
     format : true,//是否格式化数据内容。如里程、时间信息。若开启则根据locale配置输出对应国家语言的信息的内容
     locale : 'zh'//设置语言
