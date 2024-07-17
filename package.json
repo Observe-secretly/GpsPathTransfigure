@@ -30,6 +30,7 @@
     "README.md",
     "index.js",
     "lang/i18n.js",
-    "package.json"
+    "package.json",
+    "doc/*"
   ]
 }
