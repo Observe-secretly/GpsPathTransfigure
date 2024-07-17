@@ -6,12 +6,11 @@ var config={
     distanceThresholdPercentage : 90, // 距离阈值内的点的百分比
     distanceThreshold : 35, // 距离阈值，单位为米
     stationaryEndPoints : 10, // 判断静止状态结束的连续点数
-    format : true,
-    locale : 'zh'
+    proximityStopThreshold:35,// 近距离停留点阈值。此值通常要大于等于distanceThreshold
+    proximityStopMerge:false,// 近距离停留点合并。建议默认开启
+    format : true,//是否格式化数据内容。如里程、时间信息。若开启则根据locale配置输出对应国家语言的信息的内容
+    locale : 'zh'//设置语言
 }
-
-var stopPoints = []; //记录所有停留中心点
-const finalPoints = []; // 存储最终的轨迹点
 
 
 /**
@@ -59,10 +58,12 @@ function formatDistance(meters) {
  * @returns 
  */
 function optimize(gpsPoints) {
-    let N=config.minComparisonPoints 
-    let M=config.distanceThresholdPercentage
-    let X=config.distanceThreshold
-    let Z=config.stationaryEndPoints
+  var finalPoints = []; // 存储最终的轨迹点
+
+  let N=config.minComparisonPoints 
+  let M=config.distanceThresholdPercentage
+  let X=config.distanceThreshold
+  let Z=config.stationaryEndPoints
 
   let i = 0;
 
@@ -102,7 +103,6 @@ function optimize(gpsPoints) {
 
       const centerPoint = calculateGeographicalCenter(staticPointsSequence);
       finalPoints.push(centerPoint); // 将中心点加入结果数组
-      stopPoints.push(centerPoint);// 将中心点加入到停留点数组中
       i = staticEndIndex; // 跳到静止状态结束的点继续处理
     } else {
       finalPoints.push(gpsPoints[i]); // 非静止状态点，直接加入结果数组
@@ -110,14 +110,78 @@ function optimize(gpsPoints) {
     }
   }
 
+  //是否合并相距较近的停留点
+  if(config.proximityStopMerge){
+    finalPoints  = proximityStopMerge(finalPoints)
+  }
+  
 
   // 返回处理后的轨迹点数组
   return {
-    "finalPoints":finalPoints,
-    "stopPoints":stopPoints,
+    "finalPoints": finalPoints,
+    "stopPoints":dismantleStopPoint(finalPoints),
   }; 
 }
 
+/**
+ * 把停留点从坐标中单独提出来
+ * @param {*} points 
+ * @returns 
+ */
+function dismantleStopPoint(points){
+  let stopPoints = []
+  points.forEach(item=>{
+    if(item.stopTimeSeconds){
+      stopPoints.push(item)
+    }
+  })
+  return stopPoints
+}
+
+/**
+ * 把连续且相距不远的停留点识别出来并且做合并操作
+ * @param {*} points 
+ */
+function proximityStopMerge(points){
+  let processedPoints = []; // 存储处理后的 GPS 点
+  let i = 0; // 初始化索引
+
+  while (i < points.length) {
+    processedPoints.push(points[i]);
+    if (points[i].stopTimeSeconds) { // 如果当前点是停留点
+        let j = i + 1; // 设置内循环索引
+
+        while (j < points.length) { // 检查后续的停留点
+          if (points[j].stopTimeSeconds) { // 检查是否为停留点
+            const distance = calculateDistance(
+                points[i],
+                points[j]
+            );
+
+            if (distance <= config.proximityStopThreshold) { 
+              // 如果距离小于等于 proximityStopThreshold 米
+              // 则忽略掉后续距离较近的停留点
+            } else {
+              // 跳跃设置外循环索引
+              i = j+1; // 从超过 proximityStopThreshold 米的停留点继续处理
+              break; // 距离超过 proximityStopThreshold 米，结束内循环
+            }
+          }else{
+            processedPoints.push(points[j]);
+          } 
+          
+          j++; // 继续检查下一个点
+          
+        }
+        
+    }
+      
+      
+      i++;
+  }
+
+  return processedPoints;
+}
 
 /**
  * 计算GPS坐标序列的理论中心点

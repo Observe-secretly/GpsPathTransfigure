@@ -13,7 +13,7 @@
 
 
     try {
-        let response = await fetch('/src/json/demo1.json');
+        let response = await fetch('/src/json/proximityStopMergeTest.json');
         let data = await response.json();
         antResults = data; // 将 JSON 数据赋值给 antResults 数组
 
