@@ -65,7 +65,7 @@ const staticPoints = GpsPathTransfigure.optimize(gpsPoint);
 const finalPoints = staticPoints.finalPoints
 const stopPoints = staticPoints.stopPoints
 ```
-代码中直接使用finalPoints渲染轨迹即可。若想要渲染停留点打头针效果，则渲染所有的stopPoints即可
+代码中直接使用finalPoints渲染轨迹即可。若想要渲染停留点大头针效果，则渲染所有的stopPoints即可
 
 # 问题交流反馈或issues
  QQ：914245697
