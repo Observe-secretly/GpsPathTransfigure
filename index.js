@@ -5,15 +5,15 @@ import  moment from "moment"
 var config={
     minComparisonPoints : 10, // 最少比较的点数
     distanceThresholdPercentage : 70, // 距离阈值内的点的百分比
-    distanceThreshold : 45, // 距离阈值，单位为米
+    distanceThreshold : 35, // 距离阈值，单位为米
     stationaryEndPoints : 10, // 判断静止状态结束的连续点数
     
-    proximityStopThreshold:50,// 近距离停留点距离阈值。此值通常要大于等于distanceThreshold
+    proximityStopThreshold:35,// 近距离停留点距离阈值。此值通常要大于等于distanceThreshold
     proximityStopTimeInterval:60,//近距离停留点时间间隔阈值。单位分钟
     proximityStopMerge:true,// 近距离停留点合并。建议默认开启
     
     smoothness:true,//是否开启停留点前后点位的平滑过度。你必须配置对应的地图密钥。否则无效。开启此项会额外消耗移动端流量，并且轨迹渲染速度也会降低
-    smoothnessAvgThreshold:2,//平滑过度距离倍数阈值。点之间的距离超过平均值的这个倍数后，才会被捕捉到进行平滑处理
+    smoothnessAvgThreshold:1.6,//平滑过度距离倍数阈值。点之间的距离超过平均值的这个倍数后，才会被捕捉到进行平滑处理
     aMapKey:'',// 配置高德地图可以调用jsapi路线规划的密钥
     gMapKey:'',// 配置google地图密钥
     defaultMapService:'',// 默认地图服务。枚举值【amap】【gmap】。不配置则默认语言是zh时使用amap。其它语言都适用googleMap
@@ -421,7 +421,7 @@ async function gmapServicePlan(startPoint, endPoint) {
   var request = {
     origin: `${startPoint.lat},${startPoint.lng}`,
     destination: `${endPoint.lat},${endPoint.lng}`,
-    travelMode: 'WALKING'
+    travelMode: 'WALKING',
   };
 
   return new Promise((resolve, reject) => {
@@ -482,7 +482,7 @@ function proximityStopMerge(points){
           //计算后续的点和停留点的时间间隔
           const timeInterval = calculateMilliseconds(points[i].currentTime,points[j].currentTime)/(1000*60)
 
-          //如果比较时间间隔超过一定时间则后续的比较不做了。
+          //如果比较时间间隔超过一定时间则后续的比较不做了
           if(timeInterval <= config.proximityStopTimeInterval){
             // 跳跃设置外循环索引
             i = j; // 从超过 proximityStopThreshold 米的停留点继续处理
