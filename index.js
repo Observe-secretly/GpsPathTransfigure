@@ -12,7 +12,8 @@ var config={
     proximityStopTimeInterval:60,//近距离停留点时间间隔阈值。单位分钟
     proximityStopMerge:true,// 近距离停留点合并。建议默认开启
     
-    stopPointSmoothness:true,//是否开启停留点前后点位的平滑过度。你必须配置对应的地图密钥。否则无效。开启此项会额外消耗移动端流量，并且轨迹渲染速度也会降低
+    smoothness:true,//是否开启停留点前后点位的平滑过度。你必须配置对应的地图密钥。否则无效。开启此项会额外消耗移动端流量，并且轨迹渲染速度也会降低
+    smoothnessAvgThreshold:1.6,//平滑过度距离阈值。点之间的距离超过平均值的这个倍数后，才会被捕捉到进行平滑处理
     amapKey:'',// 配置高德地图可以调用jsapi路线规划的密钥
     googleMapKey:'',// 配置google地图密钥
     defaultMapService:'',// 默认地图服务。枚举值【amap】【gmap】。不配置则默认语言是zh时使用amap。其它语言都适用googleMap
@@ -130,8 +131,8 @@ async function optimize(gpsPoints) {
   stopPoints = dismantleStopPoint(finalPoints)
 
   // 停留点前后点位的平滑过度
-  if(config.stopPointSmoothness){
-    finalPoints = await stopPointSmoothness(finalPoints)
+  if(config.smoothness){
+    finalPoints = await smoothness(finalPoints)
   }
 
   // 返回处理后的轨迹点数组
@@ -142,10 +143,10 @@ async function optimize(gpsPoints) {
 }
 
 /**
- * 停留点平滑过度。使用地图服务提供的功能，对停留点和真实点之间进行道路吸附补点衔接
+ * 停留点平滑过度
  * @param {*} points 
  */
-async function stopPointSmoothness(points){
+async function smoothness(points){
   let mapService = config.defaultMapService;
   if(mapService){
     switch (mapService) {
@@ -187,63 +188,168 @@ async function stopPointSmoothness(points){
  * @param {*} mapService 
  */
 async function smoothnessOptimize(points,mapService){
+  //去掉最大值最小值后，统计距离平均值。
+  let avgDistance = calculateAverageDistance(points)
+  
+  // 把距离高于平均值的GPS点。记录下来
+  let optimizePointsIndex = recordIndices(points,avgDistance)
+
+  //optimizePointsIndex的长度代表需要调用多少次地图服务商接口规划路径。
+  //所以这里要控制调用的最大次数，控制性能
+  // return await optimizeGetMapPlan(points,optimizePointsIndex);
+  return await optimizeGetMapPlan(points,optimizePointsIndex,mapService);
+}
+
+/**
+ * 优化获取地图计划
+ * @param {Array} points 点数组 [{lon: Number, lat: Number, currentTime: String}, ...]
+ * @param {Array} optimizePointsIndex 优化点索引数组 [[{index: Number, point: Object}, ...], ...]
+ */
+async function optimizeGetMapPlan(points,optimizePointsIndex,mapService){
+  let planPoints = []
+  const promises = optimizePointsIndex.map(async (group) => {
+    if (group.length < 2) return;
+
+    const startPoint = group[0].point;
+    const endPoint = group[group.length - 1].point;
+    const index = group[0].index;
+
+    // 获取新的 GPS 点
+    const newPoints = await mapServicePlan(startPoint, endPoint,mapService);
+    planPoints.push({
+      index:index,
+      points:newPoints
+    })
+
+    //标记要删除的GPS
+    group.map(item=>{
+      points[item.index].isDeleted=true
+    })
+
+
+  });
+
+  // 并发处理所有 mapServicePlan 调用
+  await Promise.all(promises);
+  console.log(planPoints,'完成')
+
   let resultPoints = []
-
-  //停留点上一个点
-  let lastPoint = undefined
-  //停留点
-  let stopPoint = undefined
-  //停留点上一个点
-  let nextPoint = undefined
-
   for (let index = 0; index < points.length; index++) {
-    let item = points[index]
-    resultPoints.push(item)
-
-    if(stopPoint){
-      nextPoint = item
-      lastPoint = item
-      //调用对应的地图服务进行轨迹优化补点
-      let locus1Promise = mapServicePlan(lastPoint,stopPoint,mapService)
-      let locus2Promise = mapServicePlan(stopPoint,nextPoint,mapService)
-
-      const [locus1Result, locus2Result] = await Promise.all([locus1Promise, locus2Promise]);
-
-      //在原有轨迹中删除lastPoint、stopPoint、nextPoint。把locus1、locus2追加进去
-      resultPoints.splice(-3);
-      resultPoints = [...resultPoints,...locus1Result,...locus2Result]
-
-
-      //清空stopPoint和nextPoint
-      stopPoint = undefined
-      nextPoint = undefined
-
+    const point = points[index];
+    //把不需要删除的坐标点添加到结果集中
+    if(!point.isDeleted){
+      resultPoints.push(point)  
     }
-
-    if(item.stopTimeSeconds){
-      //记录停留点
-      stopPoint = item
-
-      if(index  == points.length - 1){
-        //停留点是最后一个点。此时没有nextPoint。
-        //调用对应的地图服务进行轨迹优化
-        let locusResult = await mapServicePlan(lastPoint,stopPoint,mapService)
-        //在原有轨迹中删除lastPoint、stopPoint。把locus1追加到末尾
-        resultPoints.splice(-2);
-        resultPoints = [...resultPoints,...locusResult]
-      }else{
-        continue
+    //每添加一次就判定index处是否在planPoints中存在，存在的话，把对应的gps序列追加到resultPoints中
+    planPoints.map(item=>{
+      if(item.index==index){
+        resultPoints.push(...item.points)
       }
-      
-    }
-
-    //刷新上个点
-    lastPoint = item
+    })
   }
 
-  console.log(resultPoints)
-  return resultPoints;
+  console.log(points,'标记删除后')
+  console.log(resultPoints,'完全处理完成后')
 
+
+
+  return resultPoints;
+}
+
+/**
+ * 记录距离超过平均值50%的点对下标
+ * @param {Array} points 点数组 [{x: Number, y: Number}, ...]
+ * @returns {Array} 二维数组，记录超过距离阈值的点对下标
+ */
+function recordIndices(points,averageDistance) {
+  let distances = [];
+
+  // 计算所有点之间的距离
+  for (let index = 1; index < points.length; index++) {
+      const lastPoint = points[index - 1];
+      const currentPoint = points[index];
+      const distance = calculateDistance(lastPoint, currentPoint);
+      distances.push(distance);
+  }
+
+  // 阈值
+  const threshold = averageDistance * config.smoothnessAvgThreshold;
+  console.log(threshold,'阈值')
+
+  let result = [];
+  let tempIndices = [];
+
+  for (let i = 0; i < distances.length; i++) {
+      if (distances[i] > threshold) {
+          if (tempIndices.length === 0) {
+              tempIndices.push({
+                index:i,
+                point:points[i]
+              }, {
+                index:i+1,
+                point:points[i+1]
+              });
+          } else {
+              tempIndices.push({
+                index:i+1,
+                point:points[i+1]
+              });
+          }
+      } else {
+          if (tempIndices.length > 0) {
+              result.push([...new Set(tempIndices)]);
+              tempIndices = [];
+          }
+      }
+  }
+
+  // 如果循环结束时还有未处理的临时下标
+  if (tempIndices.length > 0) {
+      result.push([...new Set(tempIndices)]);
+  }
+
+  console.log(result)
+  return result;
+}
+
+
+/**
+ * 去掉最大值和最小值和零后，统计距离平均值
+ * @param {Array} points 点数组 [{x: Number, y: Number}, ...]
+ * @returns {Number} 平均距离
+ */
+function calculateAverageDistance(points) {
+  if (points.length < 3) {
+    throw new Error('点的数量必须大于等于3');
+  }
+
+  let distances = [];
+
+  // 计算所有点之间的距离
+  for (let index = 1; index < points.length; index++) {
+      const lastPoint = points[index - 1];
+      const currentPoint = points[index];
+      const distance = calculateDistance(lastPoint, currentPoint);
+      if(distance>0){//排除掉等于0的值
+        distances.push(distance);
+      }
+  }
+
+  // 去掉所有的最大值和最小值
+  const maxDistance = Math.max(...distances);
+  const minDistance = Math.min(...distances);
+  distances = distances.filter(distance => distance !== maxDistance && distance !== minDistance);
+
+  // 如果所有的最大值和最小值都被移除后，数组为空，则返回 0
+  if (distances.length === 0) {
+      return 0;
+  }
+
+  // 计算平均值
+  const sum = distances.reduce((acc, curr) => parseFloat(acc)  + parseFloat(curr), 0);
+  const averageDistance = sum / distances.length;
+
+  return averageDistance;
 }
 
 /**
