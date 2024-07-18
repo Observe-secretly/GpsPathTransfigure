@@ -19,12 +19,15 @@
     "url": "https://github.com/Observe-secretly/GpsPathTransfigure/issues"
   },
   "homepage": "https://github.com/Observe-secretly/GpsPathTransfigure#readme",
-  "dependencies": {},
+  "dependencies": {
+    
+  },
   "devDependencies": {
+    "@amap/amap-jsapi-loader": "^1.0.1",
     "@vitejs/plugin-vue": "^5.0.5",
     "vite": "^5.3.1",
-    "@amap/amap-jsapi-loader": "^1.0.1",
-    "vue": "^3.4.29"
+    "vue": "^3.4.29",
+    "moment": "^2.30.1"
   },
   "files": [
     "README.md",

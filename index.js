@@ -1,4 +1,5 @@
 import {getI18nValue} from  "./lang/i18n"
+import  moment from "moment"
 
 //配置文件
 var config={
@@ -6,14 +7,19 @@ var config={
     distanceThresholdPercentage : 90, // 距离阈值内的点的百分比
     distanceThreshold : 35, // 距离阈值，单位为米
     stationaryEndPoints : 10, // 判断静止状态结束的连续点数
-    proximityStopThreshold:35,// 近距离停留点阈值。此值通常要大于等于distanceThreshold
+    
+    proximityStopThreshold:35,// 近距离停留点距离阈值。此值通常要大于等于distanceThreshold
+    proximityStopTimeInterval:60,//近距离停留点时间间隔阈值。单位分钟
     proximityStopMerge:true,// 近距离停留点合并。建议默认开启
+    
     stopPointSmoothness:true,//是否开启停留点前后点位的平滑过度。你必须配置对应的地图密钥。否则无效。开启此项会额外消耗移动端流量，并且轨迹渲染速度也会降低
     amapKey:'',// 配置高德地图可以调用jsapi路线规划的密钥
     googleMapKey:'',// 配置google地图密钥
     defaultMapService:'',// 默认地图服务。枚举值【amap】【gmap】。不配置则默认语言是zh时使用amap。其它语言都适用googleMap
+    
     format : true,//是否格式化数据内容。如里程、时间信息。若开启则根据locale配置输出对应国家语言的信息的内容
-    locale : 'zh'//设置语言
+    locale : 'zh',//设置语言
+    timeformat:'yyyy-MM-dd HH:mm:ss'//指定时间格式化方式
 }
 
 
@@ -323,27 +329,39 @@ function dismantleStopPoint(points){
  * @param {*} points 
  */
 function proximityStopMerge(points){
+  console.log(points)
   let processedPoints = []; // 存储处理后的 GPS 点
   let i = 0; // 初始化索引
-
   while (i < points.length) {
     processedPoints.push(points[i]);
     if (points[i].stopTimeSeconds) { // 如果当前点是停留点
         let j = i + 1; // 设置内循环索引
 
         while (j < points.length) { // 检查后续的停留点
+          //计算后续的点和停留点的时间间隔
+          const timeInterval = calculateMilliseconds(points[i].currentTime,points[j].currentTime)/(1000*60)
+
+          //如果比较时间间隔超过一定时间则后续的比较不做了。
+          if(timeInterval <= config.proximityStopTimeInterval){
+            // 跳跃设置外循环索引
+            i = j; // 从超过 proximityStopThreshold 米的停留点继续处理
+            break; // 距离超过 proximityStopThreshold 米，结束内循环
+          }
+          
           if (points[j].stopTimeSeconds) { // 检查是否为停留点
+            
+            //计算后续的停留点和当前停留点的距离
             const distance = calculateDistance(
                 points[i],
                 points[j]
             );
 
-            if (distance <= config.proximityStopThreshold) { 
+            if (distance <= config.proximityStopThreshold ) { 
               // 如果距离小于等于 proximityStopThreshold 米
               // 则忽略掉后续距离较近的停留点
             } else {
               // 跳跃设置外循环索引
-              i = j+1; // 从超过 proximityStopThreshold 米的停留点继续处理
+              i = j; // 从超过 proximityStopThreshold 米的停留点继续处理
               break; // 距离超过 proximityStopThreshold 米，结束内循环
             }
           }else{
@@ -403,7 +421,7 @@ function calculateGeographicalCenter(points) {
         endPosition:points[points.length-1],//结束停留时的GPS点
         startTime:points[0].currentTime,//停留开始时间
         endTime:points[points.length-1].currentTime,//结束停留时间
-        stopTimeSeconds:calculateMilliseconds(points[0].currentTime,points[points.length-1].currentTime)//停留时间
+        stopTimeSeconds:formatMilliseconds(calculateMilliseconds(points[0].currentTime,points[points.length-1].currentTime))//停留时间
     };
 }
 
@@ -422,14 +440,14 @@ function radiansToDegrees(radians) {
  * @returns 
  */
 function calculateMilliseconds(time1, time2) {
-    // 将时间字符串转换为 Date 对象
-    let date1 = new Date(time1.replace(' ', 'T'));
-    let date2 = new Date(time2.replace(' ', 'T'));
+  // 使用全局变量 timeformat 解析时间字符串
+  let date1 = moment(time1, config.timeformat);
+  let date2 = moment(time2, config.timeformat);
 
-    // 计算两个日期之间的毫秒值差异
-    let milliseconds = Math.abs(date2 - date1);
+  // 计算两个日期之间的毫秒值差异
+  let milliseconds = Math.abs(date2 - date1);
 
-    return formatMilliseconds(milliseconds);
+  return milliseconds;
 }
 
 /**
