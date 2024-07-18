@@ -4,18 +4,18 @@ import  moment from "moment"
 //配置文件
 var config={
     minComparisonPoints : 10, // 最少比较的点数
-    distanceThresholdPercentage : 90, // 距离阈值内的点的百分比
-    distanceThreshold : 35, // 距离阈值，单位为米
+    distanceThresholdPercentage : 70, // 距离阈值内的点的百分比
+    distanceThreshold : 45, // 距离阈值，单位为米
     stationaryEndPoints : 10, // 判断静止状态结束的连续点数
     
-    proximityStopThreshold:35,// 近距离停留点距离阈值。此值通常要大于等于distanceThreshold
+    proximityStopThreshold:50,// 近距离停留点距离阈值。此值通常要大于等于distanceThreshold
     proximityStopTimeInterval:60,//近距离停留点时间间隔阈值。单位分钟
     proximityStopMerge:true,// 近距离停留点合并。建议默认开启
     
     smoothness:true,//是否开启停留点前后点位的平滑过度。你必须配置对应的地图密钥。否则无效。开启此项会额外消耗移动端流量，并且轨迹渲染速度也会降低
-    smoothnessAvgThreshold:1.6,//平滑过度距离阈值。点之间的距离超过平均值的这个倍数后，才会被捕捉到进行平滑处理
-    amapKey:'',// 配置高德地图可以调用jsapi路线规划的密钥
-    googleMapKey:'',// 配置google地图密钥
+    smoothnessAvgThreshold:2,//平滑过度距离倍数阈值。点之间的距离超过平均值的这个倍数后，才会被捕捉到进行平滑处理
+    aMapKey:'',// 配置高德地图可以调用jsapi路线规划的密钥
+    gMapKey:'',// 配置google地图密钥
     defaultMapService:'',// 默认地图服务。枚举值【amap】【gmap】。不配置则默认语言是zh时使用amap。其它语言都适用googleMap
     
     format : true,//是否格式化数据内容。如里程、时间信息。若开启则根据locale配置输出对应国家语言的信息的内容
@@ -36,11 +36,11 @@ function calculateDistance(point1, point2) {
   const lat1 = point1.lat * Math.PI / 180; // 第一个点的纬度转换为弧度
   const lat2 = point2.lat * Math.PI / 180; // 第二个点的纬度转换为弧度
   const deltaLat = (point2.lat - point1.lat) * Math.PI / 180; // 纬度差转换为弧度
-  const deltaLon = (point2.lon - point1.lon) * Math.PI / 180; // 经度差转换为弧度
+  const deltaLng = (point2.lng - point1.lng) * Math.PI / 180; // 经度差转换为弧度
 
   const a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
             Math.cos(lat1) * Math.cos(lat2) *
-            Math.sin(deltaLon / 2) * Math.sin(deltaLon / 2); // Haversine公式的中间变量
+            Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2); // Haversine公式的中间变量
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); // Haversine公式的另一个中间变量
 
 
@@ -172,9 +172,9 @@ async function smoothness(points){
   }
 
   //判定对应的map是否有配置密钥
-  if(mapService =='amap'&&!config.amapKey){
+  if(mapService =='amap'&&!config.aMapKey){
     return points
-  }else if(mapService =='gmap'&&!config.googleMapKey){
+  }else if(mapService =='gmap'&&!config.gMapKey){
     return points
   }
 
@@ -202,7 +202,7 @@ async function smoothnessOptimize(points,mapService){
 
 /**
  * 优化获取地图计划
- * @param {Array} points 点数组 [{lon: Number, lat: Number, currentTime: String}, ...]
+ * @param {Array} points 点数组 [{lng: Number, lat: Number, currentTime: String}, ...]
  * @param {Array} optimizePointsIndex 优化点索引数组 [[{index: Number, point: Object}, ...], ...]
  */
 async function optimizeGetMapPlan(points,optimizePointsIndex,mapService){
@@ -231,7 +231,6 @@ async function optimizeGetMapPlan(points,optimizePointsIndex,mapService){
 
   // 并发处理所有 mapServicePlan 调用
   await Promise.all(promises);
-  console.log(planPoints,'完成')
 
   let resultPoints = []
   for (let index = 0; index < points.length; index++) {
@@ -247,11 +246,6 @@ async function optimizeGetMapPlan(points,optimizePointsIndex,mapService){
       }
     })
   }
-
-  console.log(points,'标记删除后')
-  console.log(resultPoints,'完全处理完成后')
-
-
 
   return resultPoints;
 }
@@ -274,7 +268,6 @@ function recordIndices(points,averageDistance) {
 
   // 阈值
   const threshold = averageDistance * config.smoothnessAvgThreshold;
-  console.log(threshold,'阈值')
 
   let result = [];
   let tempIndices = [];
@@ -308,7 +301,6 @@ function recordIndices(points,averageDistance) {
       result.push([...new Set(tempIndices)]);
   }
 
-  console.log(result)
   return result;
 }
 
@@ -370,9 +362,15 @@ async function mapServicePlan(startPoint,endPoint,mapService){
 
 }
 
+/**
+ * 调用高德地图步行路径规划，获取路线
+ * @param {*} startPoint 
+ * @param {*} endPoint 
+ * @returns 
+ */
 async function amapServicePlan(startPoint, endPoint) {
   try {
-    const response = await fetch(`https://restapi.amap.com/v3/direction/walking?key=${config.amapKey}&origin=${startPoint.lon},${startPoint.lat}&destination=${endPoint.lon},${endPoint.lat}`);
+    const response = await fetch(`https://restapi.amap.com/v3/direction/walking?key=${config.aMapKey}&origin=${startPoint.lng},${startPoint.lat}&destination=${endPoint.lng},${endPoint.lat}`);
     const data = await response.json();
     if (data.status === '1') { // 成功
       const paths = data.route.paths;
@@ -394,7 +392,7 @@ async function amapServicePlan(startPoint, endPoint) {
 }
 
 /**
- * 把amap返回的GPS坐标点序列字符串，转换成{ lon, lat }格式
+ * 把amap返回的GPS坐标点序列字符串，转换成{ lng, lat }格式
  * @param {*} gpsString 
  * @returns 
  */
@@ -404,16 +402,54 @@ function convertAmapGPSToObjects(gpsString,currentTime) {
   
   // 处理每一对经纬度，将其转换成对象格式
   const result = coordsArray.map(coord => {
-    const [lon, lat] = coord.split(',').map(Number);
-    return { lon:lon, lat:lat ,currentTime:currentTime,type:'sys'};
+    const [lng, lat] = coord.split(',').map(Number);
+    return { lng:lng, lat:lat ,currentTime:currentTime,type:'add'};
   });
 
   return result;
 }
 
-function gmapServicePlan(startPoint,endPoint){
+/**
+ * 调用Google地图步行路径规划，获取路线
+ * @param {*} startPoint 
+ * @param {*} endPoint 
+ * @returns {Promise<Array>} 返回路线点数组
+ */
+async function gmapServicePlan(startPoint, endPoint) {
+  var directionsService = new google.maps.DirectionsService();
 
+  var request = {
+    origin: `${startPoint.lat},${startPoint.lng}`,
+    destination: `${endPoint.lat},${endPoint.lng}`,
+    travelMode: 'WALKING'
+  };
+
+  return new Promise((resolve, reject) => {
+    directionsService.route(request, (result, status) => {
+      if (status === 'OK') {
+        const legs = result.routes[0].legs;
+        if (legs.length > 0) {
+          let resultPoints = [];
+          const steps = legs[0].steps;
+          steps.forEach(step => {
+            let start_location = step.start_location;
+            let end_location = step.end_location;
+            resultPoints.push(
+              { lng: start_location.lng(), lat: start_location.lat(), currentTime: startPoint.currentTime, type: 'add' },
+              { lng: end_location.lng(), lat: end_location.lat(), currentTime: startPoint.currentTime, type: 'add' }
+            );
+          });
+          resolve(resultPoints);
+        } else {
+          reject(new Error('No legs found in the route'));
+        }
+      } else {
+        reject(new Error('Directions request failed due to ' + status));
+      }
+    });
+  });
 }
+
 
 /**
  * 把停留点从坐标中单独提出来
@@ -435,7 +471,6 @@ function dismantleStopPoint(points){
  * @param {*} points 
  */
 function proximityStopMerge(points){
-  console.log(points)
   let processedPoints = []; // 存储处理后的 GPS 点
   let i = 0; // 初始化索引
   while (i < points.length) {
@@ -502,10 +537,10 @@ function calculateGeographicalCenter(points) {
 
     points.forEach(point => {
         const latRad = degreesToRadians(point.lat);
-        const lonRad = degreesToRadians(point.lon);
+        const lngRad = degreesToRadians(point.lng);
 
-        xSum += Math.cos(latRad) * Math.cos(lonRad);
-        ySum += Math.cos(latRad) * Math.sin(lonRad);
+        xSum += Math.cos(latRad) * Math.cos(lngRad);
+        ySum += Math.cos(latRad) * Math.sin(lngRad);
         zSum += Math.sin(latRad);
     });
 
@@ -514,14 +549,14 @@ function calculateGeographicalCenter(points) {
     const yAvg = ySum / numPoints;
     const zAvg = zSum / numPoints;
 
-    const lonAvg = Math.atan2(yAvg, xAvg);
+    const lngAvg = Math.atan2(yAvg, xAvg);
     const hyp = Math.sqrt(xAvg * xAvg + yAvg * yAvg);
     const latAvg = Math.atan2(zAvg, hyp);
 
     //这里一定要注意startPosition和endPosition是停止GPS序列的第一个和最后一个。他们并不会出现在轨迹上。所以不代表停留点在轨迹上的上一个和下一个点
     return {
         lat: radiansToDegrees(latAvg),//纬度
-        lon: radiansToDegrees(lonAvg),//经度
+        lng: radiansToDegrees(lngAvg),//经度
         currentTime:points[points.length-1].currentTime,//GPS点上报时间
         startPosition:points[0],//开始停留时的GPS点
         endPosition:points[points.length-1],//结束停留时的GPS点
@@ -598,9 +633,83 @@ function setLanguage(language) {
   config.locale = language
 }
 
+/**
+ * 动态加载GoogleJSAPI
+ * @param {*} apiKey 
+ * @returns 
+ */
+function loadGoogleMapsAPI(apiKey) {
+  return new Promise((resolve, reject) => {
+    if (typeof google !== 'undefined' && google.maps) {
+      // 如果已经加载过 Google Maps API
+      resolve();
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}`;
+    script.async = true;
+    script.defer = true;
+
+    script.onload = () => {
+      resolve();
+    };
+
+    script.onerror = (error) => {
+      reject(new Error('Failed to load Google Maps API'));
+    };
+
+    document.head.appendChild(script);
+  });
+}
+
+/**
+ * 动态加载高德地图 JavaScript API
+ * @param {string} apiKey - 高德地图 API 的 key
+ * @returns {Promise<void>} - 返回一个 Promise，在 API 加载完成时解析
+ */
+function loadAMapsAPI(apiKey) {
+  return new Promise((resolve, reject) => {
+    // 如果已经加载过 AMap 对象，则直接 resolve
+    if (typeof AMap !== 'undefined' && AMap.Map) {
+      resolve();
+      return;
+    }
+
+    // 创建一个新的 script 元素
+    const script = document.createElement('script');
+    script.src = `https://webapi.amap.com/maps?v=2.0&key=${apiKey}&plugin=AMap.Walking`;
+    script.async = true;
+    script.defer = true;
+
+    // 设置加载完成和失败的处理函数
+    script.onload = () => {
+      // 高德地图 API 加载成功
+      resolve();
+    };
+
+    script.onerror = (error) => {
+      // 加载失败
+      reject(new Error('Failed to load AMaps API'));
+    };
+
+    // 将 script 元素添加到页面头部，开始加载
+    document.head.appendChild(script);
+  });
+}
+
+
 const GpsPathTransfigure = {
-  conf: (newConfig) => {
+  conf:async (newConfig) => {
     config = { ...config, ...newConfig };
+    //按需动态加载地图组件
+    if(config.gMapKey!=''){
+      await loadGoogleMapsAPI(config.gMapKey);
+    }
+    // 暂时不加载js api。因为高德js api一定要渲染地图到界面上。改用web服务
+    // if(config.aMapKey!=''){
+    //   await loadAMapsAPI(config.aMapKey);
+    // }
   },
   optimize: optimize,
   calculateDistance:calculateDistance,

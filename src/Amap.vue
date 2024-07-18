@@ -1,44 +1,46 @@
 <template>
-    <div id="container" tabindex="0"></div>
+    <div id="amapContainer" tabindex="0"></div>
 </template>
 
 
 <script setup>
   import { onMounted } from "vue";
+  import  "https://webapi.amap.com/maps?v=2.0&key=[您的key]&plugin=AMap.GraspRoad"
   import GpsPathTransfigure from "/index.js"
+  
 
 
   onMounted(async ()=>{
     var antResults = []
 
-
     try {
-        let response = await fetch('/src/json/stopPointSmoothnessTest.json');
+        let response = await fetch('/src/json/amap.json');
         let data = await response.json();
         antResults = data; // 将 JSON 数据赋值给 antResults 数组
-
 
         // Example usage:
         var pathParam =[]
         for (var i = 0; i <antResults.data[0].locations.length; i++) {
             var item = antResults.data[0].locations[i]
-            pathParam[i]={lon: item.longitude1,lat: item.latitude1,currentTime:item.currentTime}
+            pathParam[i]={lng: item.longitude1,lat: item.latitude1,currentTime:item.currentTime}
         }
 
         GpsPathTransfigure.conf({
           locale:'zh',
-          
-          stopPointSmoothness:true
+          aMapKey:'您的key',
+          defaultMapService:'amap',
+          proximityStopMerge:true,
+          smoothness:true,
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
         const finalPoints = staticPoints.finalPoints
         const stopPoints = staticPoints.stopPoints
 
 
-        var map = new AMap.Map('container', {
-              resizeEnable: true,
-          center:[pathParam[0].lon,pathParam[0].lat],
-          zoom:18
+        var map = new AMap.Map('amapContainer', {
+            resizeEnable: true,
+            center:[pathParam[0].lng,pathParam[0].lat],
+            zoom:18
         });
 
 
@@ -64,8 +66,8 @@
           startPosition = stopPoint.endPosition
           console.log("")
           var marker = new AMap.Marker({
-            icon: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAAAXNSR0IArs4c6QAAAuBJREFUaEPtmTFy2zAQRT/SpklqpcgN0tmlpIJVuhzEHp9A5gky9kHSpWIhunS63CBFVCdNSpvxklwPxADgLrDSWDNB46FMQvvw/2JXoMOJD3fi8eM/gK9g9xkrvMIKDsv+8w6r/q9DO17f4RGtuxqvDeQ3UaC7wfVTuBtxPAT0gNoCpBhAHbxP6dC6C6zF4IEbswFGu2xLvvz52Uesc9XIAjANnikyIfIAbrF9TlATCYZJ3KV+V1QDFHl+HrZ2l/2GIB4qAJF1zq+B+0kM9NmuBX4Ou2lqaFXQAcxZhwI93wBf1sBiKAH9oM8o+N3dfuxhKJUKtgAXHXBfA4sl8M4DiC05gQZU0aggBpi1D68+AZCF5gBSdlLsSHYAn7ZD0LfjlHw9DZTB+L6QOkcH4NWnYHwAuv5W74dIuUE5kQIAxHlgowB5n8dUgZj/X5QCnLy8sqSIZMS21kNYiOLpbuAttRch+dq3hq9ICuSYu1ASoN/rxxpA1mBFpgWNYQiYkjwEoOxQxTkwAsT7fh/AT+qYArQ7EcB0vAgAVoSD48JGNYJHTB2F/2kqlQJJG/kKTFc19T//XuXq5wKEbRQKkovW2Wa/yMVspVz9LICoCiEAPxe4xUjsSpoeiKdRWyiZzLTisdZhvpUWV99910kKTuCeaE3ImS/D+0UKzG6pWogM7xcDGEJkWccEoIeY+5WWUqPAOnYAw3Fi3vlQgXXMAAqsVGQdU4AMCJPgswtZzNaifDDwvUkdCEHM/vCnhwx8fzAAgZXMrGOeA/6qBI8fja1zUIBgw2dsnWMA+G23uXUODuCrkNMmS9uprHZaOnmfCw7L0tdI6W5EGo3wvqZp+FR3tfj99T09tnvz8cf4eFtV1fwZu/C7zArZGDS9pfznSPrtn+/49frDNCT6dW8CY2KhEUDb0NVVVQmP8OKSmADw9E3TcEChd8ZsHXrLYbL6ZhZSWNb8VlMFzKMTTHjyAH8BjV0pQKoh+uMAAAAASUVORK5CYII=",
-            position: [stopPoint.lon, stopPoint.lat],
+            icon: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAhFJREFUWEell0tywjAMhuUwZXqJMl3CKQonK5yM9BSw7NBLdOgQM1Ki1HH0sCErILb49PAvOUDFc3p/3eLycLt90rYQthBjG0P4ou9N026+f9sKkxBKF59Wy30A6P/YeCLAYXO57r11/N4FQK/JY/S24ikFMQFKvda4YtPsvJSYAOfVMs6MpzlPXoYYP6QoeRAqgOa9ZVDcE2O7/vnbaVESASjvXXeUNqUAfCrSMEt7LWgZwKh4Npb/UVp057eX4yQdRhREgJmBJBQaAOoBh/p5AKn4BggVAADWlys5JNUCv8vTKkfgAYA0BRKAVgdPAUDX9eKUSbB0fOsikBeRUAPasRLrp7YIS48hQ0yalCDZliyrQiSqIABYRahFRQs/NVRtk6eEVpRSm15Tqu4FtRGwvDcjQOdZkOQaAM97FwAX5FVdDOA0obqBJGlM6BWRK+2XDXttuBhAk1ZrOCoJfRWAlAoVoDD01QAEYfQINuhVfVEzUrXBGFRwT03oiyLAEstNB8dtVaCGcRzfs/GS8VwfyYRRnD3MIbTfCWQYYjWYGYA0zdDNp2noxsPz37guKTqKGLfoXuf/LzIIslgc8jF9AjB6pizOawPXe2Emm6wZwgmZAKReodeecUsL0lbNNyupSMtTgBazNKQAY8Hij123nSmlog/6WO5IbYn3DxWhlOdR++mDckmNcbyWS0WrAd8B+JXLMMpEbqAAAAAASUVORK5CYII=",
+            position: [stopPoint.lng, stopPoint.lat],
             offset: new AMap.Pixel(-13, -30)
           });
           marker.setMap(map);
@@ -76,7 +78,7 @@
 
       var path1 = [];
       for(var i=0;i<finalPoints.length;i+=1){
-        path1.push([finalPoints[i].lon,finalPoints[i].lat])
+        path1.push([finalPoints[i].lng,finalPoints[i].lat])
       }
       var newLine = new AMap.Polyline({
         path:path1,
@@ -93,7 +95,7 @@
 
       var path2 = [];
       for(var i=0;i<pathParam.length;i+=1){
-        path2.push([pathParam[i].lon,pathParam[i].lat])
+        path2.push([pathParam[i].lng,pathParam[i].lat])
       }
       var oldLine = new AMap.Polyline({
         path:path2,
@@ -115,12 +117,8 @@
 </script>
 
 <style  scoped>
-    #container{
+    #amapContainer{
         width: 100%;
-        height: 100vh;
-    }
-    body,html,#app{
-      width: 100% !important;
-      height: 100% !important;
+        height: 95vh;
     }
 </style>

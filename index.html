@@ -3,11 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <script language="javascript" src="https://webapi.amap.com/maps?v=2.0&key=&plugin=AMap.GraspRoad"></script>
 
   </head>
   <body>
-    <div id="app"></div>
+    <div style="display: flex;">
+      <div id="amap" style="width: 49%;"></div>
+      <div id="gmap" style="width: 49%;margin-left: 10px;"></div>
+    </div>
+    
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
