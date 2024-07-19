@@ -29,28 +29,24 @@
           locale:'zh',
           aMapKey:'您的key',
           defaultMapService:'amap',
-          proximityStopMerge:true,
-          smoothness:true,
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
         const finalPoints = staticPoints.finalPoints
         const stopPoints = staticPoints.stopPoints
-
+        const center = staticPoints.center
+        const zoom = staticPoints.zoom
 
         var map = new AMap.Map('amapContainer', {
             resizeEnable: true,
-            center:[pathParam[0].lng,pathParam[0].lat],
-            zoom:18
+            center:[center.lng,center.lat],
+            zoom:zoom
         });
-
 
         var startPosition = null
         //给开始点设置初始值
         if(finalPoints[0].stopTimeSeconds == null){//如果优化后的第一个点不是停留点，则设置为开始值
             startPosition = finalPoints[0]
         }
-
-
 
         for(var i=0;i<stopPoints.length;i+=1){
           var stopPoint = stopPoints[i]

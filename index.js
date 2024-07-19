@@ -1,13 +1,18 @@
 import {getI18nValue} from  "./lang/i18n"
 import  moment from "moment"
 
+//参数自动优化次数
+let autoOptimizeCount = 0
+
 //配置文件
 var config={
     minComparisonPoints : 10, // 最少比较的点数
     distanceThresholdPercentage : 70, // 距离阈值内的点的百分比
     distanceThreshold : 35, // 距离阈值，单位为米
     stationaryEndPoints : 10, // 判断静止状态结束的连续点数
-    
+    autoOptimize : true, // 是否开启参数自动优化
+    autoOptimizeMaxCount : 10,//自动优化调整次数
+
     proximityStopThreshold:35,// 近距离停留点距离阈值。此值通常要大于等于distanceThreshold
     proximityStopTimeInterval:60,//近距离停留点时间间隔阈值。单位分钟
     proximityStopMerge:true,// 近距离停留点合并。建议默认开启
@@ -20,7 +25,10 @@ var config={
     
     format : true,//是否格式化数据内容。如里程、时间信息。若开启则根据locale配置输出对应国家语言的信息的内容
     locale : 'zh',//设置语言
-    timeformat:'yyyy-MM-dd HH:mm:ss'//指定时间格式化方式
+    timeformat:'yyyy-MM-dd HH:mm:ss',//指定时间格式化方式
+    mapWidth:1024,//地图容器的宽度
+    mapHeight:768,//地图容器的高度
+    defaultZoom:16,//默认地图缩放比。如果无法根据轨迹计算出缩放比，则使用次值
 }
 
 
@@ -45,8 +53,6 @@ function calculateDistance(point1, point2) {
 
 
   return (R * c).toFixed(2); // 计算最终距离，单位为米，并保留两位小数
-
-  
 }
 
 //格式化距离
@@ -69,6 +75,23 @@ function formatDistance(meters) {
  * @returns 
  */
 async function optimize(gpsPoints) {
+  if(config.autoOptimize){
+    //反复渲染轨迹时，为了确保自动优化每次都生效，这里需要重置自动优化次数
+    autoOptimizeCount = 0
+    //自动优化的配置项重置
+    config.distanceThreshold = 35
+    config.stationaryEndPoints = 10
+  }
+  
+  return  innerOptimize(gpsPoints)
+}
+
+/**
+ * 寻找停留点
+ * @param {*} gpsPoints 
+ * @returns 
+ */
+async function innerOptimize(gpsPoints) {
   var finalPoints = []; // 存储最终的轨迹点
 
   let N=config.minComparisonPoints 
@@ -130,6 +153,22 @@ async function optimize(gpsPoints) {
   let stopPoints = []
   stopPoints = dismantleStopPoint(finalPoints)
 
+  if(config.autoOptimize){
+    if(autoAdjustThreshold(stopPoints) && autoOptimizeCount < config.autoOptimizeMaxCount){
+      autoOptimizeCount+=1
+  
+      config.distanceThreshold= config.distanceThreshold+5
+      config.stationaryEndPoints = config.stationaryEndPoints+3
+  
+      console.log(`第${autoOptimizeCount}次优化`)
+      console.log(config.distanceThreshold,'距离')
+      console.log(config.stationaryEndPoints,'个数')
+  
+      return innerOptimize(gpsPoints)
+    }
+  }
+  
+
   // 停留点前后点位的平滑过度
   if(config.smoothness){
     finalPoints = await smoothness(finalPoints)
@@ -139,7 +178,45 @@ async function optimize(gpsPoints) {
   return {
     "finalPoints": finalPoints,
     "stopPoints" : stopPoints,
+    "center":calculateCentroid(finalPoints),
+    'zoom':calculateZoom(calculateBoundingBox(finalPoints), config.mapWidth, config.mapHeight),
   }; 
+}
+
+/**
+ * 计算停留点之间距离最近的另一个停留点距离小于distanceThreshold的占比
+ * @param {Array} stopPoints - 包含停留点坐标的数组，每个坐标是一个对象，具有lat和lng属性
+ * @returns {Boolean} - 若占比超过一定值则返回true，否则返回false
+ */
+function autoAdjustThreshold(stopPoints) {
+  if (!stopPoints || stopPoints.length === 0) {
+      return false;
+  }
+
+  const thresholdDistance = config.distanceThreshold; // 距离阈值，单位：米
+  const thresholdRatio = 0.2; // 占比阈值
+
+  let closePointsCount = 0;
+
+  for (let i = 0; i < stopPoints.length; i++) {
+      let hasClosePoint = false;
+      for (let j = 0; j < stopPoints.length; j++) {
+          if (i !== j) {
+              const distance = calculateDistance(stopPoints[i], stopPoints[j]);
+              if (distance <= thresholdDistance) {
+                  hasClosePoint = true;
+                  break;
+              }
+          }
+      }
+      if (hasClosePoint) {
+          closePointsCount++;
+      }
+  }
+
+  const ratio = closePointsCount / stopPoints.length;
+
+  return ratio > thresholdRatio;
 }
 
 /**
@@ -210,12 +287,10 @@ async function optimizeGetMapPlan(points,optimizePointsIndex,mapService){
   const promises = optimizePointsIndex.map(async (group) => {
     if (group.length < 2) return;
 
-    const startPoint = group[0].point;
-    const endPoint = group[group.length - 1].point;
     const index = group[0].index;
 
     // 获取新的 GPS 点
-    const newPoints = await mapServicePlan(startPoint, endPoint,mapService);
+    const newPoints = await mapServicePlan(group,mapService);
     planPoints.push({
       index:index,
       points:newPoints
@@ -350,13 +425,16 @@ function calculateAverageDistance(points) {
  * @param {*} endPoint 
  * @param {*} mapService 
  */
-async function mapServicePlan(startPoint,endPoint,mapService){
+async function mapServicePlan(pointGroup,mapService){
+  const startPoint = pointGroup[0].point;
+  const endPoint = pointGroup[pointGroup.length - 1].point;
   switch (mapService) {
     case 'amap':
       return amapServicePlan(startPoint,endPoint)
       break;
     case 'gmap':
-      return gmapServicePlan(startPoint,endPoint)
+      // return gmapServicePlan(startPoint,endPoint)
+      return gmapServicePlan(pointGroup)
       break;
   }
 
@@ -415,39 +493,26 @@ function convertAmapGPSToObjects(gpsString,currentTime) {
  * @param {*} endPoint 
  * @returns {Promise<Array>} 返回路线点数组
  */
-async function gmapServicePlan(startPoint, endPoint) {
-  var directionsService = new google.maps.DirectionsService();
+async function gmapServicePlan(points) {
+  const startPoint = points[0].point;
+  const endPoint = points[points.length - 1].point;
 
-  var request = {
-    origin: `${startPoint.lat},${startPoint.lng}`,
-    destination: `${endPoint.lat},${endPoint.lng}`,
-    travelMode: 'WALKING',
-  };
+  let path = points.map(item => `${item.point.lat},${item.point.lng}`).join('|');  
 
-  return new Promise((resolve, reject) => {
-    directionsService.route(request, (result, status) => {
-      if (status === 'OK') {
-        const legs = result.routes[0].legs;
-        if (legs.length > 0) {
-          let resultPoints = [];
-          const steps = legs[0].steps;
-          steps.forEach(step => {
-            let start_location = step.start_location;
-            let end_location = step.end_location;
-            resultPoints.push(
-              { lng: start_location.lng(), lat: start_location.lat(), currentTime: startPoint.currentTime, type: 'add' },
-              { lng: end_location.lng(), lat: end_location.lat(), currentTime: startPoint.currentTime, type: 'add' }
-            );
-          });
-          resolve(resultPoints);
-        } else {
-          reject(new Error('No legs found in the route'));
-        }
-      } else {
-        reject(new Error('Directions request failed due to ' + status));
-      }
-    });
-  });
+  const response = await fetch(`https://roads.googleapis.com/v1/snapToRoads?key=${config.gMapKey}&interpolate=true&path=${path}`);
+  const data = await response.json();
+  let resultPoints = [];
+  if(data&&data.snappedPoints&&data.snappedPoints.length>0){
+    data.snappedPoints.map(item=>{
+      let location = item.location;
+      location.latitude
+      location.longitude
+      resultPoints.push(
+        { lng: location.longitude, lat: location.latitude, currentTime: startPoint.currentTime, type: 'add' }
+      );
+    })
+  }
+  return resultPoints
 }
 
 
@@ -634,82 +699,96 @@ function setLanguage(language) {
 }
 
 /**
- * 动态加载GoogleJSAPI
- * @param {*} apiKey 
- * @returns 
+ * 计算一组GPS坐标的质心（中心点）
+ * @param {Array} positions - 包含GPS坐标的数组，每个坐标是一个对象，具有lat和lon属性
+ * @returns {Object|null} - 包含质心纬度和经度的对象，如果输入数组为空，则返回null
  */
-function loadGoogleMapsAPI(apiKey) {
-  return new Promise((resolve, reject) => {
-    if (typeof google !== 'undefined' && google.maps) {
-      // 如果已经加载过 Google Maps API
-      resolve();
-      return;
-    }
+function calculateCentroid(positions) {
+  // 如果输入的坐标数组为空或未定义，则返回null
+  if (!positions || positions.length === 0) {
+      return null;
+  }
 
-    const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}`;
-    script.async = true;
-    script.defer = true;
+  // 初始化纬度和经度的累加器
+  let sumLat = 0;
+  let sumLng = 0;
 
-    script.onload = () => {
-      resolve();
-    };
+  // 遍历所有的坐标点，累加它们的纬度和经度
+  for (let i = 0; i < positions.length; i++) {
+      sumLat += positions[i].lat;
+      sumLng += positions[i].lng;
+  }
 
-    script.onerror = (error) => {
-      reject(new Error('Failed to load Google Maps API'));
-    };
+  // 计算平均值（质心）的纬度和经度
+  const centroidLat = sumLat / positions.length;
+  const centroidLng = sumLng / positions.length;
 
-    document.head.appendChild(script);
-  });
+  // 返回包含质心纬度和经度的对象
+  return { lat: centroidLat, lng: centroidLng };
 }
 
 /**
- * 动态加载高德地图 JavaScript API
- * @param {string} apiKey - 高德地图 API 的 key
- * @returns {Promise<void>} - 返回一个 Promise，在 API 加载完成时解析
+ * 计算边界框（Bounding Box），包括最小和最大纬度、经度
+ * @param {Array} positions - 包含GPS坐标的数组，每个坐标是一个对象，具有lat和lng属性
+ * @returns {Object|null} - 包含minLat, maxLat, minLng, maxLng的对象，如果输入数组为空，则返回null
  */
-function loadAMapsAPI(apiKey) {
-  return new Promise((resolve, reject) => {
-    // 如果已经加载过 AMap 对象，则直接 resolve
-    if (typeof AMap !== 'undefined' && AMap.Map) {
-      resolve();
-      return;
-    }
+function calculateBoundingBox(positions) {
+  if (!positions || positions.length === 0) {
+      return null;
+  }
 
-    // 创建一个新的 script 元素
-    const script = document.createElement('script');
-    script.src = `https://webapi.amap.com/maps?v=2.0&key=${apiKey}&plugin=AMap.Walking`;
-    script.async = true;
-    script.defer = true;
+  let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
 
-    // 设置加载完成和失败的处理函数
-    script.onload = () => {
-      // 高德地图 API 加载成功
-      resolve();
-    };
+  for (let i = 0; i < positions.length; i++) {
+      const lat = positions[i].lat;
+      const lng = positions[i].lng;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+  }
 
-    script.onerror = (error) => {
-      // 加载失败
-      reject(new Error('Failed to load AMaps API'));
-    };
-
-    // 将 script 元素添加到页面头部，开始加载
-    document.head.appendChild(script);
-  });
+  return { minLat, maxLat, minLng, maxLng };
 }
 
+/**
+* 根据边界框计算合适的地图缩放级别
+* @param {Object} boundingBox - 包含minLat, maxLat, minLng, maxLng的对象
+* @param {Number} mapWidth - 地图容器的宽度（像素）
+* @param {Number} mapHeight - 地图容器的高度（像素）
+* @returns {Number} - 计算出的地图缩放级别
+*/
+function calculateZoom(boundingBox, mapWidth, mapHeight) {
+  if(!boundingBox){
+    //轨迹数据有问题时返回的默认缩放比
+    return config.defaultZoom
+  }
+  const WORLD_DIM = { height: 256, width: 256 };
+  const ZOOM_MAX = 21;
+
+  function latRad(lat) {
+      const sin = Math.sin(lat * Math.PI / 180);
+      const radX2 = Math.log((1 + sin) / (1 - sin)) / 2;
+      return Math.max(Math.min(radX2, Math.PI), -Math.PI) / 2;
+  }
+
+  function zoom(mapPx, worldPx, fraction) {
+      return Math.floor(Math.log(mapPx / worldPx / fraction) / Math.LN2);
+  }
+
+  const latFraction = (latRad(boundingBox.maxLat) - latRad(boundingBox.minLat)) / Math.PI;
+  const lngDiff = boundingBox.maxLng - boundingBox.minLng;
+  const lngFraction = ((lngDiff < 0 ? lngDiff + 360 : lngDiff) / 360);
+
+  const latZoom = zoom(mapHeight, WORLD_DIM.height, latFraction);
+  const lngZoom = zoom(mapWidth, WORLD_DIM.width, lngFraction);
+
+  return Math.min(latZoom, lngZoom, ZOOM_MAX);
+}
 
 const GpsPathTransfigure = {
   conf:async (newConfig) => {
     config = { ...config, ...newConfig };
-    //按需动态加载地图组件
-    if(config.gMapKey!=''){
-      await loadGoogleMapsAPI(config.gMapKey);
-    }
-    // 暂时不加载js api。因为高德js api一定要渲染地图到界面上。改用web服务
-    // if(config.aMapKey!=''){
-    //   await loadAMapsAPI(config.aMapKey);
-    // }
   },
   optimize: optimize,
   calculateDistance:calculateDistance,

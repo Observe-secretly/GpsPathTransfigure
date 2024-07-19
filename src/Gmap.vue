@@ -87,21 +87,19 @@ function gcj02towgs84 (lng, lat) {
             locale:'zh',
             gMapKey:'您的key',
             defaultMapService:'gmap',
-            proximityStopMerge:true,
-            smoothness:true,
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
         const finalPoints = staticPoints.finalPoints
         const stopPoints = staticPoints.stopPoints
-
-
+        const center = staticPoints.center
+        const zoom = staticPoints.zoom
 
         const { Map } = await google.maps.importLibrary("maps");
         const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
 
         let map = new Map(document.getElementById("gmap"), {
-            center: { lat: finalPoints[0].lat, lng: finalPoints[0].lng},
-            zoom: 18,
+            center: { lat: center.lat, lng: center.lng},
+            zoom: zoom,
             mapId: "4504f8b37365c3d0",
             mapTypeId: "terrain",
         });
