@@ -170,7 +170,7 @@ async function innerOptimize(gpsPoints) {
   
 
   // 停留点前后点位的平滑过度
-  if(config.smoothness){
+  if(config.smoothness && finalPoints.length>3){
     finalPoints = await smoothness(finalPoints)
   }
 
