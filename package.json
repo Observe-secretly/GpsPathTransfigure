@@ -35,6 +35,7 @@
     "package.json",
     "doc/centerpoint.png",
     "doc/smoothness.png",
-    "doc/stoppoint.png"
+    "doc/stoppoint.png",
+    "doc/autoOptimize.png"
   ]
 }

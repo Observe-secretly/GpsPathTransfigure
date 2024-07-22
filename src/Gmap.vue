@@ -3,7 +3,7 @@
 </template>
 <script setup>
     import { onMounted } from "vue";
-    import "https://maps.googleapis.com/maps/api/js?key=AIzaSyC0-QkuR8XeQ4XF8yQfj6goHOmI_9awtPU"
+    import "https://maps.googleapis.com/maps/api/js?key=[您的key]"
     import GpsPathTransfigure from "/index.js"
 
     //定义一些常量
@@ -85,7 +85,7 @@ function gcj02towgs84 (lng, lat) {
         }
         GpsPathTransfigure.conf({
             locale:'zh',
-            gMapKey:'AIzaSyC0-QkuR8XeQ4XF8yQfj6goHOmI_9awtPU',
+            gMapKey:'您的key',
             defaultMapService:'gmap',
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);

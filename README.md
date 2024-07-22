@@ -27,18 +27,26 @@
 识别出停留点轨迹序列后，需要计算这些点的中心点，当作停留点。算法如下：
 ![centerpoint.png](/doc/centerpoint.png)
 
-# 噪点平滑处理原理
-// TODO 示意图
-1、统计相邻两点之间的距离，去掉最大值和最小值（如果有相同的最大/小值一并去掉），统计出平均值。
-2、若超出平均值一定倍数`smoothnessAvgThreshold`，则判定点距离过远，需要平滑处理
-3、平滑处理的方式：国内使用高德地图步行路线规划功能补点；国外使用Google道路吸附功能补点
-4、性能方面也不必担心。插件整体架构使用了异步的方式并发处理这些平滑点。网络（客户端）正常情况下此功能会带来5%～30%的性能损耗。但它依然很快。
+# 平滑处理补点原理
+![smoothness.png](/doc/smoothness.png)
+图中绿色的段落会被识别出来，调用地图服务进行补点
+
+- 1、统计相邻两点之间的距离，去掉最大值和最小值（如果有相同的最大/小值一并去掉），统计出平均值。
+- 2、若超出平均值一定倍数`smoothnessAvgThreshold`，则判定点距离过远，需要平滑处理
+- 3、平滑处理的方式：国内使用高德地图步行路线规划功能补点；国外使用Google道路吸附功能补点
+- 4、性能方面也不必担心。插件整体架构使用了异步的方式并发处理这些平滑点。网络（客户端）正常情况下此功能会带来5%～30%的性能损耗。但它依然很快。
 
 # 自动优化
 ## 什么是自动优化
 在开启自动优化`autoOptimize=true`后，插件会根据轨迹的实际情况自动调整停留点的识别精度。避免过于密集的停留点影响查阅轨迹的效果。最终精度大小取决于你的GPS坐标上报的频率和平均误差(偏移)。理论上GPS点约密集且误差在35米内，则自动优化不会触发。
 ## 自动优化原理
-//TODO 示意图
+![autoOptimize.png](/doc/autoOptimize.png)
+图中圈圈表示为停留点范围。
+
+- 1、统计停留点之间互相进行比对。计算相距最近的停留点距离（红色部分）是否小于等于distanceThreshold(绿色部分)；
+- 2、若相距较近的点数量占总停留点数的比例超过20%，则扩大distanceThreshold参数和stationaryEndPoints参数重新进行评估计算；
+- 3、最大评估autoOptimizeMaxCount次；
+- 4、性能：评估过程不会进行多余的网路操作，仅带来极小的CPU计算开销
 
 
 # 二次开发与测试
@@ -67,14 +75,14 @@ import GpsPathTransfigure from "gpspathtransfigure"
 |proximityStopMerge|`Boolean`|true|| 近距离停留点合并。建议默认开启|
 |smoothness|`Boolean`|true||是否开启停留点前后点位的平滑过度。你必须配置对应的地图密钥。否则无效。开启此项会额外消耗移动端流量，并且轨迹渲染速度也会降低|
 |smoothnessAvgThreshold|`Number`|1.6||平滑过度距离倍数阈值。点之间的距离超过平均值的这个倍数后，才会被捕捉到进行平滑处理|
-|aMapKey|`String`||| 配置高德地图可以调用路线规划的`密钥`|
-|gMapKey|`String`||| 配置google地图`密钥`|
+|aMapKey|`String`||| 配置高德地图可以调用路线规划的`Web服务密钥`。平滑过度时使用|
+|gMapKey|`String`||| 配置google地图`密钥`。平滑过度时使用|
 |defaultMapService|`String`||| 默认地图服务。枚举值【amap】【gmap】。配置后将会强制使用相应的地图服务。不配置，则默认语言是zh时使用amap。其它语言都使用googleMap|
 |format |`Boolean`| true||是否格式化数据内容。如里程、时间信息。若开启则根据locale配置输出对应国家语言的信息的内容|
 |locale |`String`| zh||设置语言|
 |timeformat|`String`|yyyy-MM-dd HH mm:ss||指定时间格式化方式|
-|mapWidth|`Number`|1024||地图容器的宽度。单位`px`|
-|mapHeight|`Number`|768||地图容器的高度。单位`px`|
+|mapWidth|`Number`|1024||地图容器的宽度。单位`px`。zoom计算时使用|
+|mapHeight|`Number`|768||地图容器的高度。单位`px`。zoom计算时使用|
 |defaultZoom|`Number`|16||默认地图缩放比。如果无法根据轨迹计算出缩放比，则使用此值|
 ## 使用案例(Vue3)
 ``` javascript
