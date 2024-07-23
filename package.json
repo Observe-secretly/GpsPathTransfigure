@@ -1,6 +1,6 @@
 {
   "name": "gpspathtransfigure",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Designed specifically for rendering trajectories of GPS points reported by devices. Optimize GPS coordinate trajectory. Calculate stop points, stay time, exercise time, mileage and other information.",
   "main": "index.js",
   "type": "module",
