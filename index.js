@@ -29,6 +29,8 @@ var config={
     mapWidth:1024,//地图容器的宽度
     mapHeight:768,//地图容器的高度
     defaultZoom:16,//默认地图缩放比。如果无法根据轨迹计算出缩放比，则使用次值
+
+    openDebug:false,//开启调试后打印调试信息
 }
 
 
@@ -160,9 +162,11 @@ async function innerOptimize(gpsPoints) {
       config.distanceThreshold= config.distanceThreshold+5
       config.stationaryEndPoints = config.stationaryEndPoints+3
   
-      console.log(`第${autoOptimizeCount}次优化`)
-      console.log(config.distanceThreshold,'距离')
-      console.log(config.stationaryEndPoints,'个数')
+      if(config.openDebug){
+        console.log(`第${autoOptimizeCount}次优化`)
+        console.log(config.distanceThreshold,'距离阈值')
+        console.log(config.stationaryEndPoints,'静止状态结束的连续点数')
+      }
   
       return innerOptimize(gpsPoints)
     }
@@ -179,6 +183,7 @@ async function innerOptimize(gpsPoints) {
     "finalPoints": finalPoints,
     "stopPoints" : stopPoints,
     "center":calculateCentroid(finalPoints),
+    "segmentInfo":generateSegmentInfo(finalPoints),
     'zoom':calculateZoom(calculateBoundingBox(finalPoints), config.mapWidth, config.mapHeight),
   }; 
 }
@@ -786,12 +791,79 @@ function calculateZoom(boundingBox, mapWidth, mapHeight) {
   return Math.min(latZoom, lngZoom, ZOOM_MAX);
 }
 
+/**
+ * 生成段落信息 方便展示
+ * @param {*} positions GPS坐标
+ * @returns 
+ */
+function generateSegmentInfo(positions){
+  const result = [];
+  let movementStart = null; // 用于记录运动开始的点
+
+  positions.forEach((position, index) => {
+      // 判断是否是停留点
+      if (position.startPosition && position.endPosition) {
+          // 如果之前有运动点，先将运动段添加到结果中
+          if (movementStart) {
+            let duration = calculateMilliseconds(positions[index - 1].currentTime,movementStart.currentTime)
+              result.push({
+                  type: 'motion',
+                  startPosition: movementStart,
+                  endPosition: { lat: positions[index - 1].lat, lng: positions[index - 1].lng },
+                  duration: formatMilliseconds(duration), // 计算运动持续时间
+                  startTime: movementStart.currentTime,
+                  endTime: positions[index - 1].currentTime,
+                  distance: formatDistance(calculateDistance(movementStart, { lat: positions[index - 1].lat, lng: positions[index - 1].lng })) // 计算距离
+              });
+              movementStart = null; // 重置运动开始点
+          }
+
+          // 处理停留点
+          result.push({
+              type: 'stopped',
+              startPosition: position.startPosition,
+              endPosition: position.endPosition,
+              duration: position.stopTimeSeconds,
+              startTime: position.startTime,
+              endTime: position.endTime,
+              distance: 0 // 停留时距离为 0
+          });
+      } else {
+          // 如果是运动点
+          if (!movementStart) {
+              movementStart = { lat: position.lat, lng: position.lng, currentTime: position.currentTime };
+          }
+      }
+  });
+
+  // 处理最后一段运动，如果最后一个点是运动点
+  if (movementStart) {
+      const lastPosition = positions[positions.length - 1];
+      let duration = calculateMilliseconds(lastPosition.currentTime,movementStart.currentTime)
+      result.push({
+          type: 'motion',
+          startPosition: movementStart,
+          endPosition: { lat: lastPosition.lat, lng: lastPosition.lng },
+          duration: formatMilliseconds(duration), // 计算运动持续时间
+          startTime: movementStart.currentTime,
+          endTime: lastPosition.currentTime,
+          distance: formatDistance(calculateDistance(movementStart, { lat: lastPosition.lat, lng: lastPosition.lng })) // 计算距离
+      });
+  }
+
+  if(config.openDebug){
+    console.log(result)
+  }
+
+  return result;
+}
+
+
 const GpsPathTransfigure = {
   conf:async (newConfig) => {
     config = { ...config, ...newConfig };
   },
   optimize: optimize,
-  calculateDistance:calculateDistance,
   setLanguage:setLanguage,
 };
 

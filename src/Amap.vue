@@ -1,13 +1,32 @@
 <template>
-    <div id="amapContainer" tabindex="0"></div>
+  <div class="mapContainer">
+    <div id="amapContainer" style="height: 100vh;" tabindex="0"></div>
+    <div class="scroll-container">
+      <div class="card-container">
+        <div v-for="(segment, index) in segmentInfoData" :key="index" class="card">
+          <div class="card-header">{{ segment.type === 'motion' ? '运动' : '停留' }}</div>
+          <div class="card-body">
+            <p><strong>开始位置:</strong> Lat: {{ segment.startPosition.lat }}, Lng: {{ segment.startPosition.lng }}</p>
+            <p><strong>结束位置:</strong> Lat: {{ segment.endPosition.lat }}, Lng: {{ segment.endPosition.lng }}</p>
+            <p><strong>持续时间:</strong> {{ segment.duration }} </p>
+            <p><strong>开始时间:</strong> {{ segment.startTime }}</p>
+            <p><strong>结束时间:</strong> {{ segment.endTime }}</p>
+            <p v-if="segment.type === 'motion'"><strong>距离:</strong> {{ segment.distance }} </p>
+          </div>
+        </div>
+      </div>
+    </div> 
+  </div>
+    
+
 </template>
 
 
 <script setup>
-  import { onMounted } from "vue";
-  import  "https://webapi.amap.com/maps?v=2.0&key=[您的key]&plugin=AMap.GraspRoad"
+  import { ref, onMounted } from 'vue';
+  import  "https://webapi.amap.com/maps?v=2.0&key=[您的jsApi Key]&plugin=AMap.GraspRoad"
   import GpsPathTransfigure from "/index.js"
-  
+  const segmentInfoData = ref([]);
 
 
   onMounted(async ()=>{
@@ -27,14 +46,13 @@
 
         GpsPathTransfigure.conf({
           locale:'zh',
-          aMapKey:'您的key',
+          aMapKey:'[您的web服务key]',
           defaultMapService:'amap',
+          openDebug:false,
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
-        const finalPoints = staticPoints.finalPoints
-        const stopPoints = staticPoints.stopPoints
-        const center = staticPoints.center
-        const zoom = staticPoints.zoom
+        const { finalPoints, stopPoints, center, zoom ,segmentInfo} = staticPoints;
+        segmentInfoData.value = segmentInfo
 
         var map = new AMap.Map('amapContainer', {
             resizeEnable: true,
@@ -42,25 +60,10 @@
             zoom:zoom
         });
 
-        var startPosition = null
-        //给开始点设置初始值
-        if(finalPoints[0].stopTimeSeconds == null){//如果优化后的第一个点不是停留点，则设置为开始值
-            startPosition = finalPoints[0]
-        }
 
         for(var i=0;i<stopPoints.length;i+=1){
           var stopPoint = stopPoints[i]
-          
-          //计算上个点和这个点之间的距离
-          if(startPosition!=null){
-              //上个点的结束减去这个点的开始
-              var distance = GpsPathTransfigure.calculateDistance(startPosition,stopPoint.startPosition)
-              console.log("行驶里程:"+distance)
-          }
-          console.log(stopPoint.startTime+"<-->"+stopPoint.endTime+" = "+stopPoint.stopTimeSeconds)
-          //计算完成后缓存这个点的ent
-          startPosition = stopPoint.endPosition
-          console.log("")
+        
           var marker = new AMap.Marker({
             icon: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAhFJREFUWEell0tywjAMhuUwZXqJMl3CKQonK5yM9BSw7NBLdOgQM1Ki1HH0sCErILb49PAvOUDFc3p/3eLycLt90rYQthBjG0P4ou9N026+f9sKkxBKF59Wy30A6P/YeCLAYXO57r11/N4FQK/JY/S24ikFMQFKvda4YtPsvJSYAOfVMs6MpzlPXoYYP6QoeRAqgOa9ZVDcE2O7/vnbaVESASjvXXeUNqUAfCrSMEt7LWgZwKh4Npb/UVp057eX4yQdRhREgJmBJBQaAOoBh/p5AKn4BggVAADWlys5JNUCv8vTKkfgAYA0BRKAVgdPAUDX9eKUSbB0fOsikBeRUAPasRLrp7YIS48hQ0yalCDZliyrQiSqIABYRahFRQs/NVRtk6eEVpRSm15Tqu4FtRGwvDcjQOdZkOQaAM97FwAX5FVdDOA0obqBJGlM6BWRK+2XDXttuBhAk1ZrOCoJfRWAlAoVoDD01QAEYfQINuhVfVEzUrXBGFRwT03oiyLAEstNB8dtVaCGcRzfs/GS8VwfyYRRnD3MIbTfCWQYYjWYGYA0zdDNp2noxsPz37guKTqKGLfoXuf/LzIIslgc8jF9AjB6pizOawPXe2Emm6wZwgmZAKReodeecUsL0lbNNyupSMtTgBazNKQAY8Hij123nSmlog/6WO5IbYn3DxWhlOdR++mDckmNcbyWS0WrAd8B+JXLMMpEbqAAAAAASUVORK5CYII=",
             position: [stopPoint.lng, stopPoint.lat],
@@ -111,10 +114,3 @@
  
   
 </script>
-
-<style  scoped>
-    #amapContainer{
-        width: 100%;
-        height: 95vh;
-    }
-</style>

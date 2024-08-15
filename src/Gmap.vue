@@ -1,10 +1,29 @@
 <template>
-<div id="gmap"></div>
+    <div class="mapContainer">
+        <div id="gmapContainer" style="height: 100vh;" ></div>
+        <div class="scroll-container">
+        <div class="card-container">
+            <div v-for="(segment, index) in segmentInfoData" :key="index" class="card">
+            <div class="card-header">{{ segment.type === 'motion' ? '运动' : '停留' }}</div>
+            <div class="card-body">
+                <p><strong>开始位置:</strong> Lat: {{ segment.startPosition.lat }}, Lng: {{ segment.startPosition.lng }}</p>
+                <p><strong>结束位置:</strong> Lat: {{ segment.endPosition.lat }}, Lng: {{ segment.endPosition.lng }}</p>
+                <p><strong>持续时间:</strong> {{ segment.duration }} </p>
+                <p><strong>开始时间:</strong> {{ segment.startTime }}</p>
+                <p><strong>结束时间:</strong> {{ segment.endTime }}</p>
+                <p v-if="segment.type === 'motion'"><strong>距离:</strong> {{ segment.distance }} </p>
+            </div>
+            </div>
+        </div>
+        </div> 
+    </div>
+
 </template>
 <script setup>
-    import { onMounted } from "vue";
+    import { ref, onMounted } from 'vue';
     import "https://maps.googleapis.com/maps/api/js?key=[您的key]"
     import GpsPathTransfigure from "/index.js"
+    const segmentInfoData = ref([]);
 
     //定义一些常量
     var x_PI = 3.14159265358979324 * 3000.0 / 180.0;
@@ -85,19 +104,17 @@ function gcj02towgs84 (lng, lat) {
         }
         GpsPathTransfigure.conf({
             locale:'zh',
-            gMapKey:'您的key',
+            gMapKey:'[您的key]',
             defaultMapService:'gmap',
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
-        const finalPoints = staticPoints.finalPoints
-        const stopPoints = staticPoints.stopPoints
-        const center = staticPoints.center
-        const zoom = staticPoints.zoom
+        const { finalPoints, stopPoints, center, zoom ,segmentInfo} = staticPoints;
+        segmentInfoData.value = segmentInfo
 
         const { Map } = await google.maps.importLibrary("maps");
         const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
 
-        let map = new Map(document.getElementById("gmap"), {
+        let map = new Map(document.getElementById("gmapContainer"), {
             center: { lat: center.lat, lng: center.lng},
             zoom: zoom,
             mapId: "4504f8b37365c3d0",
