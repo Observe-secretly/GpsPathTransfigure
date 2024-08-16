@@ -117,18 +117,30 @@
           path.push([point.lng,point.lat])
         }
 
-        var subLine = new AMap.Polyline({
+        var subLine = null 
+        if(item.type=='add'){
+          subLine = new AMap.BezierCurve({
+            path: path,
+            strokeColor: "#959595",
+            strokeOpacity: 0.3,
+            strokeWeight: 6,
+            strokeStyle: 'dashed',
+            zIndex: 50
+          });
+        }else{
+          subLine = new AMap.BezierCurve({
           path: path,
-          borderWeight: 2,
           strokeColor: item.color,
+          strokeOpacity: 0.5,
           lineJoin: 'round',
-          showDir: true,
+          lineCap:'round',
           strokeOpacity: 1,
           strokeWeight: 6,
-          strokeStyle: "solid",
           geodesic:true,
           zIndex: 50
         });
+        }
+        
 
         // 渲染优化后的点
         map.add(subLine);

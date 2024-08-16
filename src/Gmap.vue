@@ -130,53 +130,42 @@ function gcj02towgs84 (lng, lat) {
 
         // 创建带有方向性的轨迹线
         var lineSymbol = {
-            path: google.maps.SymbolPath.FORWARD_OPEN_ARROW, // 自定义箭头形状的SVG路径
+            path: google.maps.SymbolPath.CIRCLE, // 自定义箭头形状的SVG路径
             scale: 1,
             strokeOpacity: 1,// 透明度
-            strokeColor: '#ffffff',
+            strokeColor: '#959595',
         };
 
         for(var i=0;i<trajectoryPoints.length;i+=1){
             let item = trajectoryPoints[i]
             
-            const flightPath = new google.maps.Polyline({
-                path: item.path,
-                strokeColor: item.color,
-                strokeOpacity: 0.8,
-                strokeWeight: 6,
-                icons: [
-                    {
-                    icon: lineSymbol,
-                    offset: '0%',
-                    repeat: '30px' // 每隔多少px重复显示箭头
-                    }
-                ]
-            });
-
+            let flightPath = null
+            if(item.type=='add'){
+                flightPath = new google.maps.Polyline({
+                    path: item.path,
+                    strokeColor: '#959595',
+                    strokeOpacity: 0.3,
+                    strokeWeight: 6,
+                    icons: [
+                        {
+                        icon: lineSymbol,
+                        offset: '0%',
+                        repeat: '30px' // 每隔多少px重复显示箭头
+                        }
+                    ]
+                });
+            }else{
+                flightPath = new google.maps.Polyline({
+                    path: item.path,
+                    strokeColor: item.color,
+                    strokeOpacity: 0.8,
+                    strokeWeight: 6,
+                });
+            }
             flightPath.setMap(map);
 
-      }
+        }
 
-
-        // const flightPath = new google.maps.Polyline({
-        //     path: finalPoints,
-        //     // strokeColor: item.color,
-        //     strokeOpacity: 0.8,
-        //     strokeWeight: 6,
-        //     icons: [
-        //         {
-        //         icon: lineSymbol,
-        //         offset: '0%',
-        //         repeat: '30px' // 每隔多少px重复显示箭头
-        //         }
-        //     ]
-        // });
-
-        // flightPath.setMap(map);
-
-
-
-        
         stopPoints.map(item=>{
             const beachFlagImg = document.createElement("img");
             beachFlagImg.src = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAAAXNSR0IArs4c6QAABzBJREFUeF7tnT2WFDcQxzU4JCIggsiP3CGBA3aDuQAHsH0CeD4B7An84ATgA/gCE+xu4ABn5H6OTETgyA4Zv+oZDRqtulstlbq+1Mnu7PaXVL/6V6mk7tm4vpnugY3p1vfGuw6AcQg6AB0A4z1gvPldAToAxnvAePO7AnQAdPfA/hd3MbTw3vHnxj07tXh/+tvN8Le9uz3rjS/uZvOzO/xP6aZSAQajf+NeOW/geuNdwSk2L93r+lPxOoMaABoYfcxSqmAQD8D+zeCVr4j86kq6KogFYPD4e+6ayPDxZcWCIA6AFaW+hC1xIIgCYP/WXSMmdiUGzjlGFAQiAGDu9WkovrhLCUNI9gAQJ3k5Hj+1D3s1YA2AcON7MFhDwBYAJcZnDwFLAJQZnzUE7ABQany2ELACgFlxpzYBFDE6YAOACeN7JBgNEfkAIKPIg6MKG3ezeeEucU5WdxYWACiP+6xDARcA9nUcyzx685J+WT45ACa9/yuv5EUiDgDge//T1859KFy88/iwgmzY/l5hNRhxQkgKQBPvBwM+Py4T+HCVDwJA8zRYV/Lb5ToAECeE1AC08f7QkODJbzOaGQMA3g8QrLERqkBGz7TpgSbeD7f6ImJqiQrEx+aAg9E9JgFoMe6PvRiMAwDEioBhtNQ5SsMGYRigVID28g8y/umWPwCHJecktiC56KryD57KXQHgHonCgB4AUvIPMRxGBY+CoV0r+R/CTeHQE44lCgNUAODLf03y1xKKBeemCAM6ABjz/rjzYT/srcbr43shCAOrA9Bk2hcKP2EFb2zoF6sEBgyYQ0UTAGA/yjU29Et5ZgfgDvLrKwA2ACmjjo3HU3nCUhUoqTLmX2P1ySHZAKS8Hzo7F4AS+W5bLewAZDvLmPElA0AwFFxfAbBKwFPxPFcBsmmb2LFERcZO1wHItMiU9y9RgMzLTe7WAVjWi9Vl4DnjSwbAuZ4DzOIULviAnf2qnbAOUDorN3vx5jt0ALK6OCz8gATHhaAOQFY3HqYgVt5QKoHe4L7iNwVAi+LPWJ8tWXySPocBBcB4t4+f4fPVPi0AmCgFYwAQe48SAOzMBmLVAjwISwAAmcbaHj3Lm4TKvF4HILOj7uyWCwD2St94SFqXA6we/0mSQLgoSiIYUtABKHWd9UcB5AD8gRkCLs7XG9YoAEECSKYAAwRvHN6ysCkF8E8JwUXDYlGxzyQO9MUoWIFcuEKIIv7TAoCZCOYWglrVBOrnA0jiPy0AmMPBDkCxnq1eCQzvFC0M5AKQ001tF3wk74BK/kkVYMgDsMKAbADI5J8eAKwwIBkAouzfSxFpCEBTAcEAUMo/uQKg1QTkAkAq/ywAQFEBLABynzDKSSYz9qH2fj4A1OYCJQCAsWEyJ9xShaL6Mf4YCuTezwaAahUoASA+JmUm7Mmj4BocvJ8XADUqUAJAvLYwBUBNbX86BLDwflYAVKkANgDg+TBp1Og1cVy8nx8ApSoQP/ZdOCGTkbdh7MLG+9kBUKUCGKZpfw5WxucJQKkKtDde9RU4ST+bSmCqV6ufHqo2VZMTsPN+lgrgux5toqiJLZeflKP38wZAVyhg6f2sAVCUELI1PnsABggw1w4uV+7qI7hKP+skMOx19CXk1SZddALW3i9CAY4qAC/4C17mv8gIVDuzN74YAMTlAwSveimlnHxFUO6NiwoFxMu8cvtUlAIICgUipF9MEhjTzLxAJMr44hSAe5WQ+5AvFRrE5ADsh4aC4n7YlyIBYJgPiJN+sTnAmRJgPVm0JG2+u69Y44vNAThBIDHuqwgBp4SQctZQaNxXBQBhPiBa+lXkAGehAPuLKKbzAhXGV5EDrJ4PCKrz5+S2YoeBqcatMl+gIO6rywFWDAVqpF9dDrACBOqMry4HaJYPKIv7qkNAk/qAsrhvAgDE+oBK6VedAyCGAtXGV50DYIQC6XV+c3WAsQYXPmuo3vtNKMBJCZZNHZswvi0Als0adgBy4oe0fTIXlJoxvikFOIWCmWcNLSR+ZuoAyQmj6WljU95vUgGGAtFIQmjN++0CkFYBc95vF4DEiMCi95sFIBEGTHq/bQDOVaADIG1Mj3G/Phm0Kv9mFGC3211EwAyfv//zpx/h5+9P3r0P/n/jf99ut6ffMYDjeA5Vi0IDQ/vXycSGP7PBt59/HT7/9fCHOdsACLew03a7hdfVqNlUAHA0PBh90uCx1R78+9E9+O9jDgDxoQMQGmAQDcBut6t6eRQAANs/97+r8egrySCIBaDW+GBxAKDS+B6cS6n5gmQArpdKfo2bzxwrVgUkAwDxHiCg3iAfAABEjhjEAuCtjhEKKggS6/m+zeIBiECAj/BdcItGAwsA8F4u1uPjtqoBIG7YcWgYguC/JHAOjlDKYew/fJYq8XNwqwVgruH9/4ce6AAYJ6ED0AEw3gPGm98VoANgvAeMN78rQAfAeA8Yb/7/4jYoruG2tbUAAAAASUVORK5CYII=";

@@ -30,7 +30,13 @@ var config={
     mapHeight:768,//地图容器的高度
     defaultZoom:16,//默认地图缩放比。如果无法根据轨迹计算出缩放比，则使用次值
     pathColorOptimize:false,//是否开启轨迹颜色美化
-    speedColors : ["#815af7", "#6f42f3", "#6439e4", "#28b44e", "#16a544", "#0b963f","#f98925", "#f27716", "#ea670e", "#ee3e3e", "#e02c2c", "#d32020"],//速度由慢到快的12级颜色代码。【注意：长度必须是12】
+    speedColors : [
+      "#3366FF", "#3369FF", "#336CFF", "#336FFF", "#3372FF", "#3375FF",
+      "#3399FF", "#33A3FF", "#33ADFF", "#33B7FF", "#33C1FF", "#33CCFF", 
+      "#66FF00", "#7FFF00", "#99FF00", "#B2FF00", "#CCFF00", "#E6FF00", 
+      "#FFCC00", "#FF9933", "#FF9966", "#FF6633", "#FF3300", "#FF0000"
+    ]
+    ,//速度由慢到快的24级颜色代码。【注意：颜色越多过渡越平滑】
 
     openDebug:false,//开启调试后打印调试信息
 }
@@ -905,14 +911,6 @@ function filterStopPoints(finalPoints, stopPoints) {
 }
 
 
-
-
-
-
-
-
-
-
 async function calculateSpeed(point1, point2) {
   var distance = calculateDistance(point1, point2); // 计算两点间的距离（米）
   var timeDiff = calculateMilliseconds(point1.currentTime, point2.currentTime) / 1000; // 时间差（秒）
@@ -935,10 +933,10 @@ async function getSpeedRanges(speeds) {
   // 重新获取最小速度和最大速度
   var minSpeed = Math.min(...speeds);
   var maxSpeed = Math.max(...speeds);
-  var rangeStep = (maxSpeed - minSpeed) / 12;
+  var rangeStep = (maxSpeed - minSpeed) / config.speedColors.length;
 
   var speedRanges = [];
-  for (var i = 0; i < 12; i++) {
+  for (var i = 0; i < config.speedColors.length; i++) {
       speedRanges.push(minSpeed + rangeStep * (i + 1));
   }
   return speedRanges;
@@ -969,7 +967,7 @@ async function processTrajectory(finalPoints) {
   var speedRanges = await getSpeedRanges(speeds);
 
   var result = [];
-  var currentSegment = { color: "", path: [] };
+  var currentSegment = { color: "", path: [], type: "general" };
 
   for (var i = 0; i < finalPoints.length - 1; i++) {
       var point1 = finalPoints[i];
@@ -979,14 +977,26 @@ async function processTrajectory(finalPoints) {
       var speedIndex = determineSpeedRange(speed, speedRanges);
       var color = config.speedColors[speedIndex];
 
-      // 如果当前段颜色与上段颜色不同，则开始新的段
-      if (currentSegment.color !== color) {
+      // 下个点是add，则开始新的段
+      if(currentSegment.type=='add'&&point2.type!='add'){
+        if (currentSegment.path.length > 0) {
+          currentSegment.path.push(point2);//把下个段的起点放在当前的末尾 让轨迹连续
+          result.push(currentSegment);
+        }
+        // 创建新的段，从上一个段的最后一个点开始
+        currentSegment = { color: color, path: [point2],type: "general" };
+      }else if (currentSegment.color !== color) {
           if (currentSegment.path.length > 0) {
-            currentSegment.path.push(point2);
-              result.push(currentSegment);
+            currentSegment.path.push(point2);//把下个段的起点放在当前的末尾 让轨迹连续
+            result.push(currentSegment);
           }
           // 创建新的段，从上一个段的最后一个点开始
-          currentSegment = { color: color, path: [point2] };
+          if(point2.type=='add'){
+            currentSegment = { color: "", path: [point2],type: "add" };
+          }else{
+            currentSegment = { color: color, path: [point2],type: "general" };
+          }
+          
       }
 
       // 将当前点添加到当前段中
@@ -1001,13 +1011,6 @@ async function processTrajectory(finalPoints) {
 
   return result;
 }
-
-
-
-
-
-
-
 
 
 
