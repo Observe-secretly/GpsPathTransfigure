@@ -29,6 +29,8 @@ var config={
     mapWidth:1024,//地图容器的宽度
     mapHeight:768,//地图容器的高度
     defaultZoom:16,//默认地图缩放比。如果无法根据轨迹计算出缩放比，则使用次值
+    pathColorOptimize:false,//是否开启轨迹颜色美化
+    speedColors : ["#815af7", "#6f42f3", "#6439e4", "#28b44e", "#16a544", "#0b963f","#f98925", "#f27716", "#ea670e", "#ee3e3e", "#e02c2c", "#d32020"],//速度由慢到快的12级颜色代码。【注意：长度必须是12】
 
     openDebug:false,//开启调试后打印调试信息
 }
@@ -172,19 +174,27 @@ async function innerOptimize(gpsPoints) {
     }
   }
   
-
   // 停留点前后点位的平滑过度
   if(config.smoothness && finalPoints.length>3){
     finalPoints = await smoothness(finalPoints)
+  }
+
+  var trajectoryPoints = []
+  // 对轨迹进行颜色渲染。根据轨迹的速度不同，自适应颜色进行渲染
+  if(config.pathColorOptimize && finalPoints.length>0){
+    trajectoryPoints = await processTrajectory(finalPoints)
   }
 
   // 返回处理后的轨迹点数组
   return {
     "finalPoints": finalPoints,
     "stopPoints" : stopPoints,
+    "trajectoryPoints":trajectoryPoints,
     "center":calculateCentroid(finalPoints),
-    "segmentInfo":generateSegmentInfo(finalPoints),
     'zoom':calculateZoom(calculateBoundingBox(finalPoints), config.mapWidth, config.mapHeight),
+    "segmentInfo":generateSegmentInfo(finalPoints),
+    "startPoint":finalPoints[0],
+    "endPoint":finalPoints[finalPoints.length-1],
   }; 
 }
 
@@ -857,6 +867,148 @@ function generateSegmentInfo(positions){
 
   return result;
 }
+
+/**
+ * 比较 finalPoints 和 stopPoints，如果开始点和 stopPoints 的第一个点一样则删除 stopPoints 的第一个点；
+ * 如果结束点和 stopPoints 的最后一个点一样，则删除 stopPoints 的最后一个点
+ * @param {*} finalPoints 完整轨迹（包含停留点）
+ * @param {*} stopPoints 停留点
+ */
+function filterStopPoints(finalPoints, stopPoints) {
+  console.log(stopPoints)
+  if(stopPoints==undefined || stopPoints.length==0){
+    return undefined;
+  }
+  // 比较开始点
+  if (finalPoints.length > 0 && stopPoints.length > 0) {
+    const finalStartPoint = finalPoints[0];
+    const stopFirstPoint = stopPoints[0];
+
+    // 如果 finalPoints 的开始点与 stopPoints 的第一个点相同，则删除 stopPoints 的第一个点
+    if (finalStartPoint.lat === stopFirstPoint.lat && finalStartPoint.lng === stopFirstPoint.lng) {
+      stopPoints.shift(); // 删除第一个元素
+    }
+  }
+
+  // 比较结束点
+  if (finalPoints.length > 0 && stopPoints.length > 0) {
+    const finalEndPoint = finalPoints[finalPoints.length - 1];
+    const stopLastPoint = stopPoints[stopPoints.length - 1];
+
+    // 如果 finalPoints 的结束点与 stopPoints 的最后一个点相同，则删除 stopPoints 的最后一个点
+    if (finalEndPoint.lat === stopLastPoint.lat && finalEndPoint.lng === stopLastPoint.lng) {
+      stopPoints.pop(); // 删除最后一个元素
+    }
+  }
+
+  return stopPoints;
+}
+
+
+
+
+
+
+
+
+
+
+async function calculateSpeed(point1, point2) {
+  var distance = calculateDistance(point1, point2); // 计算两点间的距离（米）
+  var timeDiff = calculateMilliseconds(point1.currentTime, point2.currentTime) / 1000; // 时间差（秒）
+  if(distance>0&&timeDiff>0){
+    return distance / timeDiff; // 速度（米/秒）
+  }
+  return 0;
+}
+
+async function getSpeedRanges(speeds) {
+  // 去掉速度为0的重复值
+  speeds = speeds.filter((value, index, self) => value !== 0 || self.indexOf(value) === index);
+
+  // 排序速度数组
+  speeds.sort((a, b) => a - b);
+
+  // 去掉最大值
+  speeds.pop();
+
+  // 重新获取最小速度和最大速度
+  var minSpeed = Math.min(...speeds);
+  var maxSpeed = Math.max(...speeds);
+  var rangeStep = (maxSpeed - minSpeed) / 12;
+
+  var speedRanges = [];
+  for (var i = 0; i < 12; i++) {
+      speedRanges.push(minSpeed + rangeStep * (i + 1));
+  }
+  return speedRanges;
+}
+
+
+function determineSpeedRange(speed, ranges) {
+  for (var i = 0; i < ranges.length; i++) {
+      if (speed <= ranges[i]) {
+          return i;
+      }
+  }
+  return ranges.length - 1;
+}
+
+async function processTrajectory(finalPoints) {
+  var speeds = [];
+  for (var i = 0; i < finalPoints.length - 1; i++) {
+    if(finalPoints[i].type=='add'&&finalPoints[i+1].type=='add'){//如果两个点都是添加进去的点，那就不计算速度
+      speeds.push(0);
+    }else{
+      let speed = await calculateSpeed(finalPoints[i], finalPoints[i + 1])
+      speeds.push(speed);
+    }
+    
+  }
+
+  var speedRanges = await getSpeedRanges(speeds);
+
+  var result = [];
+  var currentSegment = { color: "", path: [] };
+
+  for (var i = 0; i < finalPoints.length - 1; i++) {
+      var point1 = finalPoints[i];
+      var point2 = finalPoints[i + 1];
+      var speed = speeds[i];
+
+      var speedIndex = determineSpeedRange(speed, speedRanges);
+      var color = config.speedColors[speedIndex];
+
+      // 如果当前段颜色与上段颜色不同，则开始新的段
+      if (currentSegment.color !== color) {
+          if (currentSegment.path.length > 0) {
+            currentSegment.path.push(point2);
+              result.push(currentSegment);
+          }
+          // 创建新的段，从上一个段的最后一个点开始
+          currentSegment = { color: color, path: [point2] };
+      }
+
+      // 将当前点添加到当前段中
+      currentSegment.path.push(point1);
+
+      // 添加最后一点（为了确保段完整）
+      if (i === finalPoints.length - 2) {
+          currentSegment.path.push(point2);
+          result.push(currentSegment);
+      }
+  }
+
+  return result;
+}
+
+
+
+
+
+
+
+
 
 
 const GpsPathTransfigure = {
