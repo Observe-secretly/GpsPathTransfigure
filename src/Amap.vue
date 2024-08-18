@@ -11,6 +11,7 @@
             <p><strong>持续时间:</strong> {{ segment.duration }} </p>
             <p><strong>开始时间:</strong> {{ segment.startTime }}</p>
             <p><strong>结束时间:</strong> {{ segment.endTime }}</p>
+            <p><strong>平均速度:</strong> {{ segment.averageSpeed }}</p>
             <p v-if="segment.type === 'motion'"><strong>距离:</strong> {{ segment.distance }} </p>
           </div>
         </div>
@@ -56,7 +57,7 @@
           pathColorOptimize:true,
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
-        const { finalPoints, stopPoints,trajectoryPoints, center, zoom ,segmentInfo,startPoint,endPoint} = staticPoints;
+        const { finalPoints, stopPoints,trajectoryPoints, center, zoom ,segmentInfo,startPoint,endPoint,samplePoints} = staticPoints;
         segmentInfoData.value = segmentInfo
 
         var map = new AMap.Map('amapContainer', {
@@ -144,8 +145,50 @@
 
         // 渲染优化后的点
         map.add(subLine);
-
       }
+
+
+
+
+      var moveMarker = new AMap.Marker({
+          icon: new AMap.Icon({
+            // size: new AMap.Size(32, 32),
+            // imageSize: new AMap.Size(32, 32)
+          }),
+          offset: new AMap.Pixel(-16, -32)
+        });
+        moveMarker.setMap(map);   
+
+
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // 每隔100ms渲染一个点
+        var index = 0;
+
+        async function renderNextPoint(points) {
+            // 确保 index 在范围内
+            if (index >= points.length) return;
+            
+            var point = points[index];
+            moveMarker.setPosition([point.lng, point.lat]);
+
+            // 等待100ms
+            await sleep(100);
+
+            // 更新 index
+            index++;
+
+            // 递归调用以渲染下一个点
+            await renderNextPoint(points);
+        }
+
+        // 开始渲染点
+        renderNextPoint(samplePoints);
+
+
 
       if(!graspRoad) {
           graspRoad = new AMap.GraspRoad()

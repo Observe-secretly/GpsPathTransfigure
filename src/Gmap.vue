@@ -11,6 +11,7 @@
                 <p><strong>持续时间:</strong> {{ segment.duration }} </p>
                 <p><strong>开始时间:</strong> {{ segment.startTime }}</p>
                 <p><strong>结束时间:</strong> {{ segment.endTime }}</p>
+                <p><strong>平均速度:</strong> {{ segment.averageSpeed }}</p>
                 <p v-if="segment.type === 'motion'"><strong>距离:</strong> {{ segment.distance }} </p>
             </div>
             </div>
@@ -115,7 +116,7 @@ function gcj02towgs84 (lng, lat) {
             pathColorOptimize:true,
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
-        const { finalPoints, stopPoints, trajectoryPoints,center, zoom ,segmentInfo,startPoint,endPoint} = staticPoints;
+        const { finalPoints, stopPoints, trajectoryPoints,center, zoom ,segmentInfo,startPoint,endPoint,samplePoints} = staticPoints;
         segmentInfoData.value = segmentInfo
 
         const { Map } = await google.maps.importLibrary("maps");
@@ -128,7 +129,7 @@ function gcj02towgs84 (lng, lat) {
             mapTypeId: "terrain",
         });
 
-        // 创建带有方向性的轨迹线
+
         var lineSymbol = {
             path: google.maps.SymbolPath.CIRCLE, // 自定义箭头形状的SVG路径
             scale: 1,
@@ -199,6 +200,39 @@ function gcj02towgs84 (lng, lat) {
             position: { lat: endPoint.lat, lng: endPoint.lng },
             content: endFlagImg,
         });
+
+        var moveMarker = new AdvancedMarkerElement({
+            map,
+            // position: { lat: item.lat, lng: item.lng },
+            // content: beachFlagImg,
+        });
+
+        // 每隔100ms渲染一个点
+        var index = 0;
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        async function renderNextPoint(points) {
+            // 确保 index 在范围内
+            if (index >= points.length) return;
+            
+            var point = points[index];
+            moveMarker.position={lat:point.lat,lng:point.lng}
+
+            // 等待100ms
+            await sleep(100);
+
+            // 更新 index
+            index++;
+
+            // 递归调用以渲染下一个点
+            await renderNextPoint(points);
+        }
+
+        // 开始渲染点
+        renderNextPoint(samplePoints);
 
     }
 
