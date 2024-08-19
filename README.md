@@ -138,7 +138,7 @@ onMounted(async ()=>{
 |--|--|
 |finalPoints|轨迹。格式[{lon: xx, lat: xx, currentTime: xx}]，若坐标点中出现`type: 'add'`则代表此点是噪点平滑处理时的补点|
 |stopPoints|停留点。格式[{lon: xx, lat: xx, currentTime: xx}]|
-|trajectoryPoints||
+|trajectoryPoints|颜色渲染后的轨迹信息|
 |center|中心点。格式{lon: xx, lat: xx, currentTime: xx}|
 |zoom|缩放比|
 |segmentInfo|分段信息|
