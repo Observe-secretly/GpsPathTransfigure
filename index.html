@@ -76,5 +76,48 @@
     margin: 5px 0; /* 内容段落的间距 */
     font-size: 14px; /* 内容字体大小 */
   }
+
+  /* 悬浮按钮的基础样式 */
+  .floating-button {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 100;
+      background-color: #fff;
+      border: none;
+      border-radius: 32px;
+      padding: 15px;
+      box-shadow: 0px 2px 10px rgba(0, 0, 0, 0.2);
+      cursor: pointer;
+      transition: width 0.3s ease, border-radius 0.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+  }
+
+  /* 按钮图标的样式 */
+  .floating-button img {
+      width: 32px;
+      height: 32px;
+  }
+
+  /* 当按钮处于播放状态时，变宽显示速度值 */
+  .floating-button.playing {
+      width: 120px; /* 根据需求调整宽度 */
+      border-radius: 25px; /* 使按钮两端变得圆滑 */
+  }
+
+  /* 速度值文本的样式 */
+  .speed-text {
+      font-size: 14px;
+      color: #333;
+      margin-left: 10px;
+      opacity: 0.3;
+      transition: opacity 0.3s ease;
+      width: 50px;
+  }
+
   </style>
 </html>

@@ -2,27 +2,48 @@
     <div class="mapContainer">
         <div id="gmapContainer" style="height: 100vh;" ></div>
         <div class="scroll-container">
-        <div class="card-container">
-            <div v-for="(segment, index) in segmentInfoData" :key="index" class="card">
-            <div class="card-header">{{ segment.type === 'motion' ? '运动' : '停留' }}</div>
-            <div class="card-body">
-                <p><strong>开始位置:</strong> Lat: {{ segment.startPosition.lat }}, Lng: {{ segment.startPosition.lng }}</p>
-                <p><strong>结束位置:</strong> Lat: {{ segment.endPosition.lat }}, Lng: {{ segment.endPosition.lng }}</p>
-                <p><strong>持续时间:</strong> {{ segment.duration }} </p>
-                <p><strong>开始时间:</strong> {{ segment.startTime }}</p>
-                <p><strong>结束时间:</strong> {{ segment.endTime }}</p>
-                <p><strong>平均速度:</strong> {{ segment.averageSpeed }}</p>
-                <p v-if="segment.type === 'motion'"><strong>距离:</strong> {{ segment.distance }} </p>
+            <div class="card-container">
+                <div v-for="(segment, index) in segmentInfoData" :key="index" class="card">
+                <div class="card-header">{{ segment.type === 'motion' ? '运动' : '停留' }}</div>
+                <div class="card-body">
+                    <p><strong>开始位置:</strong> Lat: {{ segment.startPosition.lat }}, Lng: {{ segment.startPosition.lng }}</p>
+                    <p><strong>结束位置:</strong> Lat: {{ segment.endPosition.lat }}, Lng: {{ segment.endPosition.lng }}</p>
+                    <p><strong>持续时间:</strong> {{ segment.duration }} </p>
+                    <p><strong>开始时间:</strong> {{ segment.startTime }}</p>
+                    <p><strong>结束时间:</strong> {{ segment.endTime }}</p>
+                    <p><strong>平均速度:</strong> {{ segment.averageSpeed }}</p>
+                    <p v-if="segment.type === 'motion'"><strong>距离:</strong> {{ segment.distance }} </p>
+                </div>
+                </div>
             </div>
-            </div>
-        </div>
         </div> 
+
+        <button class="floating-button" v-on:click ="switchPlay">
+            <img v-if="isPlaying==false" src="data:image/png;base64,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" alt="Play">
+            <img v-if="isPlaying==true" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAAAXNSR0IArs4c6QAACAdJREFUeF7tnW162zgMhEvfws5hNjlZ25Ote5g4t7C6dK2tHkcOBsSApET4V9NQFIF58UHKdtK3eA3tgTS09WH8twBgcAgCgABgcA8Mbn5kgABgcA8Mbn5kgABgnx74+Ph4zZZdr9fXlNI/K1befv/wOs8/T9P0K//7cDicj8fj//+/N2/tJgNkwadp+n4XaE1chnbnGYyXl5cfjAlbz7FZALLgi+j2ElzS5wbElmHYHACLSG8l+jMoNgnDJgDoWPRVGKZp+pl/sYXM0DUAWxP+kYYtgNAlAFsXfi0tZBh6zAhdAbBH4Zcw9AhBNwC8v7//SCnN2zip+0Z/f9u/50497+eXF63t7ZdnB/PY+xkCteHsCYTmAJCj/pxSujVg7MObeduZ52aB2gMITQEgRf1NdLbgUorJa2fA0BqCJgAQor6J6M+gIMBwPp1ObxJ0Hr+vDsBd/H8LjelK+DUbLFmtRTaoCoDBOd0L/whDqa21IagGQKFDNif8EoTF8wrV7qYmBFUAKBE/pfRWu7ErLEviZSX214LAHYAC45s1RKKSxgFaX9SAwBWAHg02ami+vDefuAGgNHTTtV5LhXYn5JkJXADQit9qD6wVjj3+crnk7TB0zOwFAR2AEF+HicZfHo0xHYDL5TIhLvAiGrl3b2NaQkAFAE1pIf5nBBUQUHdJNABQA0L85/mnRQBRAEDF/6/hodLbWypnrAeFgNUPUABA6/7pdKLcj+HonucAIaAEk1kQNPpZxPYsHGtt6DkBo5yaAUCin7FQlnO3Mk+twDIBgCwyxC9HrkYpKAYAET+bHnW/HIB8JZJhLeW1GABkYRH9NvHz1WA/UNwQFgGARH+Ibxd/ngEpBaVZwA2A0gXx3LafmTyzgBqAiP42YHllARcAovHjQ+KVBdQASM1fq9p/z0z5q2Dy83XqZ/U959aggmQBbfCpAEDSv3YBGgc8G/tsXQwYPefW2o5kAW3vpQJAIpDhcLZTtA5Z3l9yuGVurZ2KHYFqS6gF4Ms3e7QAQMpKFpE85y4FQIIyz6uxGQZAckarUz9pXRYoPecuBQA5HdTYDAPQY/rPzvAUyXNuIwDSm0nhMqABoLv0PyoASBlAm3EIACkSWqX/UQFAygDaB1AA0NQcS+pbu1aC07I2z7mtfpBKMvr2OwgA6WYWJ1sd4SmS59xWu4EyAPUBKABf1n803ViNjgzw1wMAANB7MSgAoA1HAMD1gHQsjwSmCABAGpRquKb/nc0zTXvOzfCHVJopAPTuBM/1ec5dAwCkNxMzQO9O8Fyf59wMAKT1ITsBEQApzSCUMYx9NofkBMv6POdm+IRRns0AIHWGYWwA8NkDAcCgzwJmFGoB8OUZQMst4MhHwdn2AGDwDIA8E5ACFOkBIgM8aUAsDSarL5IOgwIAw1/q6H0XEBkgSoD42UFGBvjy3SexDWz7ByRrlIAAoNMeoNYuIAAIAJ5/m2WUgHYlQGpS41nAn78YVvz3+iQHW+ZmbAMZ6xPPAaSbIJQxjI1nAZ89IGmDACoCwGg0AgAfD0hPapHyzAAAeu+ZjwvG/GDI7EvrFjDPIwKAnDYhpAUAXA8AmRkKTBSAbreCjDrYor+w4iDZjfZmFADQm1mNXrtecgTSCO0RANRuCABWugkAeB6Q6j8VgJ77gBEzgGRz1kt6CDSjCGWAOwC0jyTz4mDMXQAAAPxZDRgA4KYwdQGAzQOs9A9vA/NApA9osR2U1oXWwjVJPOcuRYAdiHAG6LUMSCJZoPSc2xEAOP2rMkDPWeBZVFiifxbIc+4SCJjpXw0AshtodSZwF2rXXxTJTv+lAEi7AdXXlJVEwajXsKO/CACpLt7FUdWhUQXV2I1Ef0nJUzWB84Klx5A3slJ6Ox6PZ42RMXbdA0jQlYhflAHQZrBVL7BHiLyivxgAcEsYWYBAIyJ+vg169Pu4pKISoMgCxQsj+G4XU0iNXzayNP2bMgCaBaIUlHOIRL9FfDMASHNiJbTcfdu+EhHfkvpn7xSXgHkCdKGxK8CBrBlYZgCiFODCoiORus+IfnMJmA1CiY1+QEYAOWNhllVKBsgLQktBQPAcAtSH1sZvuQIaAIpSYNq2yDG0zRGo+OwAogKgKAUBwYJThfj0cxUqAJoDImYd22bM/1k1WvO9/EUHQNkP5OHDPjlsLT5tF7AWgZq0dlvIQE8P76Xy+/2vnIoJjNn0Pd7MJQNoD4nm8Z6Gil6uNEAbGN4+cQWgoBzsujnUpHyvml81A5RmglrGVwp66C31j2vxjvz5fu4ZwArB4XA4b/WdRdpa36IUVgOgpBy0cAgjK5QK3yLzVQXAAkEL52hhsAjfaidUHYDZqdqGaClGro/555eXdl/RtlyPVfh8FpJS+tmi1DUDwJoNluWhBQwE0W8m1Gr2nmWzpgCwIHiEwaNxzILfBYMPcIQS0izql+tqDoBllwDU6PM0Tb/mcRmM/O+1VDsLPI+9Xq+vKaX8UbP8uonPerWO+i4BcAaBpZ11ni6ivmsA2GXBqhjp+u6En+3qpgSsOTqfm+f/TynlurvFV7fCbwKAZVnYGAjdC78pAJah//A9AD1lhc2I3n0PgKraAQy3XYbHthP1gXVc1z2AxrhFvzB/S4jmcnTsbRvZ6tQOXaRm3G4AWDM67+3zfv4u2rynzz+u7es/fZfBHN35ghbHtBohS8fuGoBSp4x0XQAwktortgYAAcDgHhjc/MgAAcDgHhjc/MgAAcDgHhjc/N8FfVj5IuR+YAAAAABJRU5ErkJggg==" >
+            <span v-if="speed != -1" class="speed-text" id="speedValue">{{speed}} km/h</span>
+        </button>
     </div>
 
 </template>
 <script setup>
     import { ref, onMounted } from 'vue';
     import GpsPathTransfigure from "/index.js"
+    // 状态变量：true表示播放，false表示暂停
+    let isPlaying = ref(false);
+    // 运动速度
+    let speed = ref(-1);
+    //用于可播放的轨迹点
+    let playPoints = []
+    //播放位置
+    let playPosition = 0
+    //用于播放的marker点
+    var moveMarker = null
+
+    //停留点标注是否可见
+    let stopMarker=[]
+
+    let map = null
 
 
     const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -31,6 +52,76 @@
     document.head.appendChild(script);
 
     const segmentInfoData = ref([]);
+    
+    /**
+     * 切换/暂停轨迹
+     */
+    function switchPlay(){
+        isPlaying.value=!isPlaying.value
+
+        if(isPlaying.value){
+          //隐藏停留点
+          hideStopMarker()
+          //显示渲染轨迹的marker点
+          moveMarker.setMap(map);
+
+          function sleep(ms) {
+              return new Promise(resolve => setTimeout(resolve, ms));
+          }
+
+
+          async function renderNextPoint(points) {
+              // 播放完毕后
+              if (playPosition >= points.length) {
+                // 重置播放进度
+                playPosition=0;
+                // 重新显示播放按钮
+                isPlaying.value=false
+                // 重置速度位初始值-1
+                speed.value = -1
+                // 隐藏渲染轨迹的标注点
+                moveMarker.setMap(null);
+                // 显示停留点标注
+                showStopMarker()
+                return 
+              }
+              
+              var point = points[playPosition];
+              moveMarker.position={lng:point.lng, lat:point.lat};
+              speed.value = parseInt(point.speed)
+
+              // 等待100ms
+              await sleep(50);
+
+              // 更新 index
+              playPosition++;
+
+              // 递归调用以渲染下一个点
+              if(isPlaying.value){
+                renderNextPoint(points)
+              }
+              
+          }
+          // 开始播放
+          renderNextPoint(playPoints);
+      }
+    }
+
+    function showStopMarker(){
+    if(stopMarker.length>0){
+      stopMarker.map(item=>{
+        item.setMap(map);
+      })
+    }
+  }
+
+  function hideStopMarker(){
+    if(stopMarker.length>0){
+      stopMarker.map(item=>{
+        item.setMap(null);
+      })
+    }
+  }
 
     //定义一些常量
     var x_PI = 3.14159265358979324 * 3000.0 / 180.0;
@@ -40,13 +131,12 @@
 
 
     // 坐标系转化方法
-function gcj02towgs84 (lng, lat) {
-    // 保存原始经纬度的正负标志
-    const originalLngSign = Math.sign(lng);
-    const originalLatSign = Math.sign(lat);
-    lat = Math.abs(lat);
-    lng = Math.abs(lng);
-
+    function gcj02towgs84 (lng, lat) {
+        // 保存原始经纬度的正负标志
+        const originalLngSign = Math.sign(lng);
+        const originalLatSign = Math.sign(lat);
+        lat = Math.abs(lat);
+        lng = Math.abs(lng);
 
         let dlat = transformlat(lng - 105.0, lat - 30.0)
         let dlng = transformlng(lng - 105.0, lat - 35.0)
@@ -118,11 +208,12 @@ function gcj02towgs84 (lng, lat) {
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
         const { finalPoints, stopPoints, trajectoryPoints,center, zoom ,segmentInfo,startPoint,endPoint,samplePoints} = staticPoints;
         segmentInfoData.value = segmentInfo
+        playPoints = samplePoints
 
         const { Map } = await google.maps.importLibrary("maps");
         const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
 
-        let map = new Map(document.getElementById("gmapContainer"), {
+        map = new Map(document.getElementById("gmapContainer"), {
             center: { lat: center.lat, lng: center.lng},
             zoom: zoom,
             mapId: "4504f8b37365c3d0",
@@ -171,11 +262,12 @@ function gcj02towgs84 (lng, lat) {
             const beachFlagImg = document.createElement("img");
             beachFlagImg.src = "data:image/png;base64,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";
             beachFlagImg.style='width:36px;'
-            new AdvancedMarkerElement({
+            let marker = new AdvancedMarkerElement({
                 map,
                 position: { lat: item.lat, lng: item.lng },
                 content: beachFlagImg,
             });
+            stopMarker.push(marker)
         })
 
 
@@ -201,38 +293,15 @@ function gcj02towgs84 (lng, lat) {
             content: endFlagImg,
         });
 
-        var moveMarker = new AdvancedMarkerElement({
-            map,
-            // position: { lat: item.lat, lng: item.lng },
-            // content: beachFlagImg,
+        // 初始化轨迹标注点
+        const moveFlagImg = document.createElement("img");
+        moveFlagImg.src = "data:image/png;base64,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";
+        moveFlagImg.style='width:16px;'
+        moveMarker = new AdvancedMarkerElement({
+            position: { lat: startPoint.lat, lng: startPoint.lng },
+            content: moveFlagImg,
         });
 
-        // 每隔100ms渲染一个点
-        var index = 0;
-
-        function sleep(ms) {
-            return new Promise(resolve => setTimeout(resolve, ms));
-        }
-
-        async function renderNextPoint(points) {
-            // 确保 index 在范围内
-            if (index >= points.length) return;
-            
-            var point = points[index];
-            moveMarker.position={lat:point.lat,lng:point.lng}
-
-            // 等待100ms
-            await sleep(100);
-
-            // 更新 index
-            index++;
-
-            // 递归调用以渲染下一个点
-            await renderNextPoint(points);
-        }
-
-        // 开始渲染点
-        renderNextPoint(samplePoints);
 
     }
 
