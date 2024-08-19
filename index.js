@@ -29,14 +29,14 @@ var config={
     mapWidth:1024,//地图容器的宽度
     mapHeight:768,//地图容器的高度
     defaultZoom:16,//默认地图缩放比。如果无法根据轨迹计算出缩放比，则使用次值
-    pathColorOptimize:false,//是否开启轨迹颜色美化
+    pathColorOptimize:true,//是否开启轨迹颜色美化
     speedColors : [
       "#3366FF", "#3369FF", "#336CFF", "#336FFF", "#3372FF", "#3375FF",
       "#3399FF", "#33A3FF", "#33ADFF", "#33B7FF", "#33C1FF", "#33CCFF", 
       "#66FF00", "#7FFF00", "#99FF00", "#B2FF00", "#CCFF00", "#E6FF00", 
       "#FFCC00", "#FF9933", "#FF9966", "#FF6633", "#FF3300", "#FF0000"
     ]
-    ,//速度由慢到快的24级颜色代码。【注意：颜色越多过渡越平滑】
+    ,//速度由慢到快的24级颜色代码。
     samplePointsNum:200,//轨迹采样数。用于控制返回值samplePoints的长度。samplePoints用于渲染轨迹使用
 
 

@@ -1,5 +1,12 @@
 # 介绍
-专为设备上报的GPS点渲染轨迹而设计。优化GPS坐标轨迹。包括计算停留点、降噪、停留时间、行驶里程等信息
+专为设备上报的GPS点渲染轨迹而设计。优化GPS坐标轨迹。包括计算停留点、降噪、停留时间、行驶里程、速度等信息
+
+## 高德地图效果
+![](/doc/amap_track.gif)
+
+## Google地图效果
+![](/doc/gmap_track.gif)
+
 
 # 插件使用前提
 您的GPS点必须是连续上报的。即便停止也要持续定时上报。足够多且连续的坐标点是轨迹渲染出色的前提。插件只是用来辅助解决精度和停留点数据问题
@@ -15,6 +22,8 @@
 - 参数自动优化策略。（根据不同轨迹自适应调整部分参数）
 - 根据轨迹自动计算中心点和Zoom缩放比
 - 高性能。（异步架构）
+- 轨迹采样（为了让不同长度的轨迹渲染时长一致）
+- 随速自适应轨迹颜色（根据相对速度的不同，一段轨迹的快慢由蓝色到红色24种颜色标注出来）
 
 # 停留点计算原理
 ## 理论依据
@@ -84,6 +93,10 @@ import GpsPathTransfigure from "gpspathtransfigure"
 |mapWidth|`Number`|1024||地图容器的宽度。单位`px`。zoom计算时使用|
 |mapHeight|`Number`|768||地图容器的高度。单位`px`。zoom计算时使用|
 |defaultZoom|`Number`|16||默认地图缩放比。如果无法根据轨迹计算出缩放比，则使用此值|
+|pathColorOptimize|`Boolean`|true||是否开启轨迹颜色美化|
+|speedColors|`Array`| `["#3366FF", "#3369FF", "#336CFF", "#336FFF", "#3372FF", "#3375FF","#3399FF", "#33A3FF", "#33ADFF", "#33B7FF", "#33C1FF", "#33CCFF", "#66FF00", "#7FFF00", "#99FF00", "#B2FF00", "#CCFF00", "#E6FF00", "#FFCC00", "#FF9933", "#FF9966", "#FF6633", "#FF3300", "#FF0000"]`||速度由慢到快的24级颜色代码|
+|samplePointsNum|`Number`|200||轨迹采样数。用于控制返回值samplePoints的长度。samplePoints用于渲染轨迹使用|
+
 ## 使用案例(Vue3)
 ``` javascript
 <script setup>
@@ -102,27 +115,36 @@ onMounted(async ()=>{
     ]
 
     GpsPathTransfigure.conf({
-        locale:'zh',
+      locale:'zh',
+      aMapKey:webApiKey,
+      defaultMapService:'amap',
+      openDebug:false,
+      pathColorOptimize:true,
+      samplePointsNum:300
     })
 
-    const staticPoints = await GpsPathTransfigure.optimize(pathParam);
-    const finalPoints = staticPoints.finalPoints
-    const stopPoints = staticPoints.stopPoints
-    const center = staticPoints.center
-    const zoom = staticPoints.zoom
+  const staticPoints = await GpsPathTransfigure.optimize(pathParam);
+    const { finalPoints, stopPoints,trajectoryPoints, center, zoom ,segmentInfo,startPoint,endPoint,samplePoints} = staticPoints;
+
+    ......
 }
 ......
 </script>
 ```
-请注意，在使用此插件时需要异步引用。代码中直接使用finalPoints渲染轨迹即可。若想要渲染停留点大头针效果，则渲染所有的stopPoints即可
+请注意，在使用此插件时需要异步引用。代码中直接使用finalPoints渲染轨迹即可。若想要渲染停留点标注效果，则渲染所有的stopPoints。渲染带颜色的轨迹请使用trajectoryPoints渲染。高德地图和Google地图的渲染案例请查阅Amap.vue/Gmap.vue源码
 
 ## 返回值说明
 |返回值|含义|
 |--|--|
 |finalPoints|轨迹。格式[{lon: xx, lat: xx, currentTime: xx}]，若坐标点中出现`type: 'add'`则代表此点是噪点平滑处理时的补点|
 |stopPoints|停留点。格式[{lon: xx, lat: xx, currentTime: xx}]|
+|trajectoryPoints||
 |center|中心点。格式{lon: xx, lat: xx, currentTime: xx}|
 |zoom|缩放比|
+|segmentInfo|分段信息|
+|startPoint|开始点|
+|endPoint|结束点|
+|samplePoints|轨迹抽样数据（固定数量）|
 
 
 # 问题交流反馈或issues
