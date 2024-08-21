@@ -135,7 +135,6 @@ onMounted(async ()=>{
 
 
 ## 进度条使用方法
-把ProgressChart.vue文件复制到项目中并在页面引用它。
 ``` javascript
 <template>
 ......
@@ -143,7 +142,7 @@ onMounted(async ()=>{
 ......
 </template>
 <script setup>
-import ProgressChart from './component/ProgressChart.vue';//注意替换成你项目的真实目录
+import ProgressChart from 'gpspathtransfigure/src/component/ProgressChart.vue';
 
   //用于可播放的轨迹点
   let playPoints = []
