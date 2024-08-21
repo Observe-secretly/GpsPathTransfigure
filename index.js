@@ -187,15 +187,18 @@ async function innerOptimize(gpsPoints) {
     finalPoints = await smoothness(finalPoints)
   }
 
-  //计算速度
+  //计算速度和里程
   for (let i = 0; i < finalPoints.length-1; i++) {
+    //速度
     if(finalPoints[i].type=='add'&&finalPoints[i+1].type=='add'){//如果两个点都是添加进去的点，那就不计算速度
       finalPoints[i].speed=0;
     }else{
       let speed = await calculateSpeed(finalPoints[i], finalPoints[i + 1])
       finalPoints[i].speed=speed;
     }
-    
+    //里程
+    let mileage = calculateDistance(finalPoints[i], finalPoints[i + 1])
+    finalPoints[i].mileage=mileage;
   }
 
   var trajectoryPoints = []

@@ -133,6 +133,35 @@ onMounted(async ()=>{
 ```
 请注意，在使用此插件时需要异步引用。代码中直接使用finalPoints渲染轨迹即可。若想要渲染停留点标注效果，则渲染所有的stopPoints。渲染带颜色的轨迹请使用trajectoryPoints渲染。高德地图和Google地图的渲染案例请查阅Amap.vue/Gmap.vue源码
 
+
+## 进度条使用方法
+把ProgressChart.vue文件复制到项目中并在页面引用它。
+``` javascript
+<template>
+......
+<ProgressChart :data="playPoints" :onMove="handleMove" :setPosition="playPosition" sliderImage="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAAAXNSR0IArs4c6QAAASBJREFUaEPtltENgkAQRO/q0H6oRNsQ29BK6EfrwGBi4gey9zIsCXH85bG3s7NyU8vOf3Xn/RcLOJ6HfhzLZXKy1nJ93Lp+yVXKRxsiOfDdzOegJRGUj5p/D60F+sUcTsM49+x572brUr6lt/8WQFeC8ukOTAfQPyXlIxHSCkXFt3huAVtMeekMO2AHxAnIK0Q/i5SP9EkC6MVE+ah5ZyEaziif7gBdCcqnC3AWahlxwEhfoRXOl0tYgDxCsYAdEAcovy47QLMN5SOFkgB6MVE+at5ZiGYbyqc7QFeC8ukCnIVaRuwstMKUMktI90BmY621LaB1Ulmc7ADNNpSPhEsC6MVE+ah5ZyGabSif7gBdCcqnC3AWahmxs9AKU8os8QK/SiBAyMIBIAAAAABJRU5ErkJggg==" />
+......
+</template>
+<script setup>
+import ProgressChart from './component/ProgressChart.vue';//注意替换成你项目的真实目录
+
+  //用于可播放的轨迹点
+  let playPoints = []
+  //播放位置。这里是轨迹点的下标。修改后可反响控制进度条进度
+  let playPosition = ref(0)
+
+  /**
+   * 拖动进度条时的回调。
+   * @param {*} index 轨迹下标
+   */
+  const handleMove = (index) => {
+  //在这里处理回调。index是轨迹数据下标
+  };
+
+</script>
+```
+项目中Amap.vue有完整的使用案例
+
 ## 返回值说明
 |返回值|含义|
 |--|--|

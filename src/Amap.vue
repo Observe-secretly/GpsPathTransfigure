@@ -18,6 +18,10 @@
       </div>
     </div> 
 
+    <div class="progress">
+      <ProgressChart :data="playPoints" :onMove="handleMove" :setPosition="playPosition" sliderImage="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAAAXNSR0IArs4c6QAAASBJREFUaEPtltENgkAQRO/q0H6oRNsQ29BK6EfrwGBi4gey9zIsCXH85bG3s7NyU8vOf3Xn/RcLOJ6HfhzLZXKy1nJ93Lp+yVXKRxsiOfDdzOegJRGUj5p/D60F+sUcTsM49+x572brUr6lt/8WQFeC8ukOTAfQPyXlIxHSCkXFt3huAVtMeekMO2AHxAnIK0Q/i5SP9EkC6MVE+ah5ZyEaziif7gBdCcqnC3AWahlxwEhfoRXOl0tYgDxCsYAdEAcovy47QLMN5SOFkgB6MVE+at5ZiGYbyqc7QFeC8ukCnIVaRuwstMKUMktI90BmY621LaB1Ulmc7ADNNpSPhEsC6MVE+ah5ZyGabSif7gBdCcqnC3AWahmxs9AKU8os8QK/SiBAyMIBIAAAAABJRU5ErkJggg==" />
+    </div>
+    
     <button class="floating-button" v-on:click ="switchPlay">
       <img v-if="isPlaying==false" src="data:image/png;base64,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" alt="Play">
       <img v-if="isPlaying==true" src="data:image/png;base64,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" >
@@ -33,6 +37,7 @@
 
 <script setup>
   import { ref, onMounted } from 'vue';
+  import ProgressChart from './component/ProgressChart.vue';
   import GpsPathTransfigure from "/index.js"
   const segmentInfoData = ref([]);
   // 状态变量：true表示播放，false表示暂停
@@ -42,7 +47,7 @@
   //用于可播放的轨迹点
   let playPoints = []
   //播放位置
-  let playPosition = 0
+  let playPosition = ref(0)
   //用于播放的marker点
   var moveMarker = null
 
@@ -54,6 +59,31 @@
   const script = document.createElement('script');
   script.src = `https://webapi.amap.com/maps?v=2.0&key=${jsApiKey}`;
   document.head.appendChild(script);
+
+  /**
+   * 拖动进度条时的回调。
+   * @param {*} index 轨迹下标
+   */
+  const handleMove = (index) => {
+    if(index>0){
+      //隐藏停留点
+      hideStopMarker()
+      //修改当前显示的marker点
+      playPosition.value = index
+      var point = playPoints[playPosition.value];
+      moveMarker.setPosition([point.lng, point.lat]);
+      speed.value = parseInt(point.speed)
+      //显示轨迹标注
+      moveMarker.show()
+    }else{
+      //显示停留点标注
+      showStopMarker()
+      //隐藏轨迹标注
+      moveMarker.hide()
+    }
+    
+
+  };
 
   /**
    * 切换/暂停轨迹
@@ -75,9 +105,9 @@
 
           async function renderNextPoint(points) {
               // 播放完毕后
-              if (playPosition >= points.length) {
+              if (playPosition.value >= points.length) {
                 // 重置播放进度
-                playPosition=0;
+                playPosition.value=0;
                 // 重新显示播放按钮
                 isPlaying.value=false
                 // 重置速度位初始值-1
@@ -89,15 +119,15 @@
                 return 
               }
               
-              var point = points[playPosition];
+              var point = points[playPosition.value];
               moveMarker.setPosition([point.lng, point.lat]);
               speed.value = parseInt(point.speed)
 
-              // 等待100ms
-              await sleep(50);
+              // 等待Nms渲染下一个点
+              await sleep(10);
 
               // 更新 index
-              playPosition++;
+              playPosition.value=playPosition.value+1;
 
               // 递归调用以渲染下一个点
               if(isPlaying.value){
@@ -152,7 +182,7 @@
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
         const { finalPoints, stopPoints,trajectoryPoints, center, zoom ,segmentInfo,startPoint,endPoint,samplePoints} = staticPoints;
         segmentInfoData.value = segmentInfo
-        playPoints = samplePoints
+        playPoints = finalPoints
 
         var map = new AMap.Map('amapContainer', {
             resizeEnable: true,
@@ -217,7 +247,7 @@
             path: path,
             strokeColor: "#959595",
             strokeOpacity: 0.3,
-            strokeWeight: 6,
+            strokeWeight: 4,
             strokeStyle: 'dashed',
             zIndex: 50
           });
@@ -229,7 +259,7 @@
           lineJoin: 'round',
           lineCap:'round',
           strokeOpacity: 1,
-          strokeWeight: 6,
+          strokeWeight: 4,
           geodesic:true,
           zIndex: 50
         });
@@ -243,7 +273,7 @@
       //初始化一个用于播放的marker点
       moveMarker = new AMap.Marker({
         icon: new AMap.Icon({
-              image:"data:image/png;base64,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",
+              image:"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAAAXNSR0IArs4c6QAAAjxJREFUaEPdWlGSwiAMJfUsq73AOvu3ejLXk9n923EvoO5ZLDugMC22JZRXhfZHp6WQl7yEJJQE6CqX6y8zlZTyU/8n2uhfKSvzjIi+RVFUp9OPvRcjAsW8bISWQuxGzSNlRYvFPgbMKABK8NFC9yAlIfany9FakauQIABTCO4KSkWxDbEIG8Dq7f1gOc1Vz9hxUlbnv98t53UvgLL82Mi6PnAmQ4/hWGMQwDMo4wPt841eACkIb0PvgIN3Anglbfos0kenTgCr5Vr6TPuK5+fL8UHehxtPjTahWuiITi0AKVLnYZ9w/KEFIFXquCCaVLIAUoo6PmY1Q6sFkIv2DThjBQ0gB+73+YIGkHTk8WSvNwCJxn2fLyga0VT0UY6mBSiKStT1RldppkLzScZ8rtYgdPQZSr6mWIuQ/PdljjpgAKs5bQEYgIAiBOZzqqZGAeBo31AbZgUNABSBONUTHIDq3MAABHQVkJFvBhQCdhu6Co6ukI7yO9Xxg+4DHEeGObDSDBqAmvPpGxlUI4YvSjP3Jq5KI7SyxvZPB9IKFfnyT+bQ2zszD4sfdt/5bwUNMD+Jl4w3g9k451FS5maFzqI+m8rMyXrbja0MfMFNGufVWjT+j8pQefGEP4rV3E21TxTUXk8tKg3lV/M9YrLlX86HfE33ghUhHJ8N6HB4j1mb6+la9nrdoTtszTU4RZEznqOS9pgpkr9QwY1EQRZwocZaxPRPx3wjAQHg0ss2ce3s7c9tdJV2v2KEbq77D8VaZVwO+X8uAAAAAElFTkSuQmCC",
               size: new AMap.Size(16, 16),
               imageSize: new AMap.Size(16, 16)
           
