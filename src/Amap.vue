@@ -175,9 +175,10 @@
           locale:'zh',
           aMapKey:webApiKey,
           defaultMapService:'amap',
-          openDebug:false,
+          openDebug:true,
           pathColorOptimize:true,
-          samplePointsNum:300
+          samplePointsNum:300,
+          smoothness:false
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
         const { finalPoints, stopPoints,trajectoryPoints, center, zoom ,segmentInfo,startPoint,endPoint,samplePoints} = staticPoints;
@@ -288,7 +289,11 @@
   }
 
   onMounted(async ()=>{
-    initMap()
+    //由于使用dom加载的地图，这里需要给一点时间让地图加载完成，不然可能会无法初始化地图. 实际开发中不必如此
+    setTimeout(function(){
+      initMap()
+    },1000)
+    
   })
 
 

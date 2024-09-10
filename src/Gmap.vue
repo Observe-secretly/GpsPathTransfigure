@@ -204,6 +204,8 @@
             locale:'en',
             gMapKey:apiKey,
             defaultMapService:'gmap',
+            openDebug:true,
+            smoothness:true,
             pathColorOptimize:true,
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
@@ -308,7 +310,10 @@
 
 
     onMounted(async() => {
-        initMap()
+        //由于使用dom加载的地图，这里需要给一点时间让地图加载完成，不然可能会无法初始化地图. 实际开发中不必如此
+        setTimeout(function(){
+            initMap()
+        },1000)
     })
 </script>
 

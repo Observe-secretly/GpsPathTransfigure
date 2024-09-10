@@ -17,8 +17,9 @@ var config={
     proximityStopTimeInterval:60,//近距离停留点时间间隔阈值。单位分钟
     proximityStopMerge:true,// 近距离停留点合并。建议默认开启
     
-    smoothness:true,//是否开启停留点前后点位的平滑过度。你必须配置对应的地图密钥。否则无效。开启此项会额外消耗移动端流量，并且轨迹渲染速度也会降低
-    smoothnessAvgThreshold:1.6,//平滑过度距离倍数阈值。点之间的距离超过平均值的这个倍数后，才会被捕捉到进行平滑处理
+    smoothness:true,//是否开启停留点前后点位的轨迹补偿。你必须配置对应的地图密钥。否则无效。开启此项会额外消耗移动端流量，并且轨迹渲染速度也会降低
+    smoothnessAvgThreshold:1.6,//轨迹补偿距离倍数阈值。点之间的距离超过平均值的这个倍数后，才会被捕捉到进行轨迹补偿
+    smoothnessLimitAvgSpeed:20,//开启轨迹补偿的最高平均速度。轨迹平均速度必须低于此值才会启用轨迹补偿
     aMapKey:'',// 配置高德地图可以调用jsapi路线规划的密钥
     gMapKey:'',// 配置google地图密钥
     defaultMapService:'',// 默认地图服务。枚举值【amap】【gmap】。不配置则默认语言是zh时使用amap。其它语言都适用googleMap
@@ -181,10 +182,20 @@ async function innerOptimize(gpsPoints) {
       return innerOptimize(gpsPoints)
     }
   }
+
+  // 抛开停留点计算整个里程的平均速度
+  let avgSpeed = await calculateAvgSpeed(finalPoints)
+  if(config.openDebug){
+    console.log("平均速度："+avgSpeed)
+  }
   
-  // 停留点前后点位的平滑过度
+  // 停留点前后点位的轨迹补偿
   if(config.smoothness && finalPoints.length>3){
-    finalPoints = await smoothness(finalPoints)
+    //如果平均速度高于15公里（缺省值）每小时，则不进行轨迹补偿过渡。过快的速度在进行轨迹补偿时会和实际轨迹相差巨大
+    if(avgSpeed<config.smoothnessLimitAvgSpeed){
+      finalPoints = await smoothness(finalPoints)
+    }
+    
   }
 
   //计算速度和里程
@@ -218,7 +229,8 @@ async function innerOptimize(gpsPoints) {
     "segmentInfo":generateSegmentInfo(finalPoints),//分段信息
     "startPoint":finalPoints[0],//开始点
     "endPoint":finalPoints[finalPoints.length-1],//结束点
-    "samplePoints":samplePoints(finalPoints)//轨迹抽样数据（固定数量）
+    "samplePoints":samplePoints(finalPoints),//轨迹抽样数据（固定数量）
+    "avgSpeed":avgSpeed
   }; 
 }
 
@@ -259,7 +271,7 @@ function autoAdjustThreshold(stopPoints) {
 }
 
 /**
- * 停留点平滑过度
+ * 轨迹补偿
  * @param {*} points 
  */
 async function smoothness(points){
@@ -299,7 +311,7 @@ async function smoothness(points){
 }
 
 /**
- * 平滑处理
+ * 轨迹补偿处理
  * @param {*} points 
  * @param {*} mapService 
  */
@@ -968,6 +980,51 @@ async function calculateSpeed(point1, point2) {
   }
   return 0;
 }
+
+/**
+ * 计算GPS轨迹的平均速度
+ * @param {*} points 
+ */
+async function calculateAvgSpeed(points) {
+  let newPoints = [];
+  // 剔除停留点
+  points.forEach(item => {
+    if (!item.stopTimeSeconds) {
+      newPoints.push(item);
+    }
+  });
+
+  if (newPoints.length < 2) {
+    return 0; // 如果有效的点少于2个，返回0
+  }
+
+  // 计算点和点之间的速度
+  let previousPoint = newPoints[0];
+  let speeds = [];
+  for (let index = 1; index < newPoints.length; index++) {
+    let speed = await calculateSpeed(previousPoint, newPoints[index]);
+    speeds.push(speed);
+    previousPoint = newPoints[index];
+  }
+
+  // 去掉相同的最大值和最小值
+  speeds.sort((a, b) => a - b);
+  let min = speeds[0];
+  let max = speeds[speeds.length - 1];
+
+  let filteredSpeeds = speeds.filter(speed => speed !== min && speed !== max);
+
+  if (filteredSpeeds.length === 0) {
+    return 0; // 如果过滤后没有剩余速度，返回0
+  }
+
+  // 计算平均速度
+  let sum = filteredSpeeds.reduce((acc, speed) => acc + speed, 0);
+  let averageSpeed = sum / filteredSpeeds.length;
+
+  return averageSpeed;
+}
+
 
 /**
  * 计算速度区间

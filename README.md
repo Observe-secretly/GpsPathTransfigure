@@ -15,7 +15,7 @@
 - 自动识别停留点
 - 密集停留点降噪
 - 卡片式信息展示
-- 噪点平滑处理（需要配置高德密钥。国外需要配置Google Map密钥）
+- 轨迹补偿（需要配置高德密钥。国外需要配置Google Map密钥）
 - 使用门槛低
 - 支持国际化
 - 高灵活性（提供多达20+个参数根据需要自由调整）
@@ -36,14 +36,14 @@
 识别出停留点轨迹序列后，需要计算这些点的中心点，当作停留点。算法如下：
 ![centerpoint.png](/doc/centerpoint.png)
 
-# 平滑处理补点原理
+# 轨迹补偿原理
 ![smoothness.png](/doc/smoothness.png)
 图中绿色的段落会被识别出来，调用地图服务进行补点
 
 - 1、统计相邻两点之间的距离，去掉最大值和最小值（如果有相同的最大/小值一并去掉），统计出平均值。
-- 2、若超出平均值一定倍数`smoothnessAvgThreshold`，则判定点距离过远，需要平滑处理
-- 3、平滑处理的方式：国内使用高德地图步行路线规划功能补点；国外使用Google道路吸附功能补点
-- 4、性能方面也不必担心。插件整体架构使用了异步的方式并发处理这些平滑点。网络（客户端）正常情况下此功能会带来5%～30%的性能损耗。但它依然很快。
+- 2、若超出平均值一定倍数`smoothnessAvgThreshold`，则判定点距离过远，需要轨迹补偿
+- 3、轨迹补偿的方式：国内使用高德地图步行路线规划功能补点；国外使用Google道路吸附功能补点
+- 4、性能方面也不必担心。插件整体架构使用了异步的方式并发处理这些补偿点。网络（客户端）正常情况下此功能会带来5%～30%的性能损耗。但它依然很快。
 
 # 自动优化
 ## 什么是自动优化
@@ -82,10 +82,11 @@ import GpsPathTransfigure from "gpspathtransfigure"
 |proximityStopThreshold|`Number`|35|| 近距离停留点距离阈值。此值通常要大于等于distanceThreshold|
 |proximityStopTimeInterval|`Number`|60||近距离停留点时间间隔阈值。单位`分钟`|
 |proximityStopMerge|`Boolean`|true|| 近距离停留点合并。建议默认开启|
-|smoothness|`Boolean`|true||是否开启停留点前后点位的平滑过度。你必须配置对应的地图密钥。否则无效。开启此项会额外消耗移动端流量，并且轨迹渲染速度也会降低|
-|smoothnessAvgThreshold|`Number`|1.6||平滑过度距离倍数阈值。点之间的距离超过平均值的这个倍数后，才会被捕捉到进行平滑处理|
-|aMapKey|`String`||| 配置高德地图可以调用路线规划的`Web服务密钥`。平滑过度时使用|
-|gMapKey|`String`||| 配置google地图`密钥`。平滑过度时使用|
+|smoothness|`Boolean`|true||是否开启停留点前后点位的轨迹补偿。你必须配置对应的地图密钥。否则无效。开启此项会额外消耗移动端流量，并且轨迹渲染速度也会降低|
+|smoothnessAvgThreshold|`Number`|1.6||轨迹补偿距离倍数阈值。点之间的距离超过平均值的这个倍数后，才会被捕捉到进行轨迹补偿|
+|smoothnessLimitAvgSpeed|`Number`|20||开启轨迹补偿的最高平均速度。轨迹平均速度必须低于此值才会启用轨迹补偿.单位是`km/h`|
+|aMapKey|`String`||| 配置高德地图可以调用路线规划的`Web服务密钥`。轨迹补偿时使用|
+|gMapKey|`String`||| 配置google地图`密钥`。轨迹补偿时使用|
 |defaultMapService|`String`||| 默认地图服务。枚举值【amap】【gmap】。配置后将会强制使用相应的地图服务。不配置，则默认语言是zh时使用amap。其它语言都使用googleMap|
 |format |`Boolean`| true||是否格式化数据内容。如里程、时间信息。若开启则根据locale配置输出对应国家语言的信息的内容|
 |locale |`String`| zh||设置语言|
@@ -164,7 +165,7 @@ import ProgressChart from 'gpspathtransfigure/src/component/ProgressChart.vue';
 ## 返回值说明
 |返回值|含义|
 |--|--|
-|finalPoints|轨迹。格式[{lon: xx, lat: xx, currentTime: xx}]，若坐标点中出现`type: 'add'`则代表此点是噪点平滑处理时的补点|
+|finalPoints|轨迹。格式[{lon: xx, lat: xx, currentTime: xx}]，若坐标点中出现`type: 'add'`则代表此点是噪点轨迹补偿处理时的补点|
 |stopPoints|停留点。格式[{lon: xx, lat: xx, currentTime: xx}]|
 |trajectoryPoints|颜色渲染后的轨迹信息|
 |center|中心点。格式{lon: xx, lat: xx, currentTime: xx}|
@@ -173,6 +174,8 @@ import ProgressChart from 'gpspathtransfigure/src/component/ProgressChart.vue';
 |startPoint|开始点|
 |endPoint|结束点|
 |samplePoints|轨迹抽样数据（固定数量）|
+|avgSpeed|平均速度(去掉最小值和最大值)|
+
 
 
 # 问题交流反馈或issues
