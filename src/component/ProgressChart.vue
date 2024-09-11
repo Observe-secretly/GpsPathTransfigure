@@ -77,6 +77,8 @@
   
       // 绘制背景填充
       ctx.value.fillStyle = '#ffffff';
+      // 设置背景透明度为30%
+      ctx.value.globalAlpha = 0.3;
       ctx.value.beginPath();
       ctx.value.moveTo(0, ctx.value.canvas.height);
       ctx.value.lineTo(0, ctx.value.canvas.height - props.data[0].speed * yStep);
@@ -92,12 +94,13 @@
       ctx.value.fill();
   
       // 设置线条样式
-      ctx.value.strokeStyle = '#ffffff';
-      ctx.value.lineWidth = 1;
-  
+      ctx.value.strokeStyle = '#1890FF';
+      ctx.value.lineWidth = 2;
+
       // 绘制折线
       ctx.value.beginPath();
       ctx.value.moveTo(0, ctx.value.canvas.height - props.data[0].speed * yStep);
+
   
       props.data.forEach((point, index) => {
         const x = index * xStep;
@@ -153,8 +156,8 @@
         stopLine.style.height = '100%';
         stopLine.style.top = '0';
         stopLine.style.backgroundColor = 'orange';
-        stopLine.style.position='absolute'
-        stopLine.style.opacity=0.6
+        stopLine.style.position='absolute';
+        stopLine.style.opacity=0.6;
         chartContainer.value.appendChild(stopLine);
   
         stopLine.addEventListener('mouseover', () => {
