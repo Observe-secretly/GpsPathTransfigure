@@ -92,7 +92,7 @@
               speed.value = parseInt(point.speed)
 
               // 等待100ms
-              await sleep(10);
+              await sleep(100);
 
               // 更新 index
               playPosition++;

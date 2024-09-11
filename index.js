@@ -19,7 +19,7 @@ var config={
     
     smoothness:true,//是否开启停留点前后点位的轨迹补偿。你必须配置对应的地图密钥。否则无效。开启此项会额外消耗移动端流量，并且轨迹渲染速度也会降低
     smoothnessAvgThreshold:1.6,//轨迹补偿距离倍数阈值。点之间的距离超过平均值的这个倍数后，才会被捕捉到进行轨迹补偿
-    smoothnessLimitAvgSpeed:20,//开启轨迹补偿的最高平均速度。轨迹平均速度必须低于此值才会启用轨迹补偿
+    smoothnessLimitAvgSpeed:40,//开启轨迹补偿的最高平均速度。轨迹平均速度必须低于此值才会启用轨迹补偿
     aMapKey:'',// 配置高德地图可以调用jsapi路线规划的密钥
     gMapKey:'',// 配置google地图密钥
     defaultMapService:'',// 默认地图服务。枚举值【amap】【gmap】。不配置则默认语言是zh时使用amap。其它语言都适用googleMap
@@ -937,7 +937,6 @@ function generateSegmentInfo(positions) {
  * @param {*} stopPoints 停留点
  */
 function filterStopPoints(finalPoints, stopPoints) {
-  console.log(stopPoints)
   if(stopPoints==undefined || stopPoints.length==0){
     return undefined;
   }
@@ -1071,7 +1070,7 @@ async function processTrajectory(finalPoints) {
   for (var i = 0; i < finalPoints.length - 1; i++) {
     speeds.push(finalPoints[i].speed);
   }
-
+  
   var speedRanges = await getSpeedRanges(speeds);
 
   var result = [];
@@ -1088,14 +1087,14 @@ async function processTrajectory(finalPoints) {
       // 下个点是add，则开始新的段
       if(currentSegment.type=='add'&&point2.type!='add'){
         if (currentSegment.path.length > 0) {
-          currentSegment.path.push(point2);//把下个段的起点放在当前的末尾 让轨迹连续
+          currentSegment.path.push(point1);
           result.push(currentSegment);
         }
         // 创建新的段，从上一个段的最后一个点开始
         currentSegment = { color: color, path: [point2],type: "general" };
       }else if (currentSegment.color !== color) {
           if (currentSegment.path.length > 0) {
-            currentSegment.path.push(point2);//把下个段的起点放在当前的末尾 让轨迹连续
+            currentSegment.path.push(point1);
             result.push(currentSegment);
           }
           // 创建新的段，从上一个段的最后一个点开始

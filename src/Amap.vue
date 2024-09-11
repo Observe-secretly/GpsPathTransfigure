@@ -124,7 +124,7 @@
               speed.value = parseInt(point.speed)
 
               // 等待Nms渲染下一个点
-              await sleep(10);
+              await sleep(100);
 
               // 更新 index
               playPosition.value=playPosition.value+1;
@@ -178,7 +178,6 @@
           openDebug:true,
           pathColorOptimize:true,
           samplePointsNum:300,
-          smoothness:false
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
         const { finalPoints, stopPoints,trajectoryPoints, center, zoom ,segmentInfo,startPoint,endPoint,samplePoints} = staticPoints;
