@@ -94,7 +94,7 @@
       ctx.value.fill();
   
       // 设置线条样式
-      ctx.value.strokeStyle = '#1890FF';
+      ctx.value.strokeStyle = '#ffffff';
       ctx.value.lineWidth = 2;
 
       // 绘制折线
@@ -206,17 +206,21 @@
     }
   };
   
-  const stopDragging = () => {
-    isDragging = false;
-  };
-  
-  // 点击进度条时移动滑块
-  const moveSliderOnClick = (e) => {
-    let rect = chartContainer.value.getBoundingClientRect();
-    let x = e.clientX - rect.left;
-    x = Math.max(0, Math.min(x, chartContainer.value.offsetWidth - slider.value.offsetWidth));
-    updateSliderPosition(x);
-  };
+    const stopDragging = () => {
+      isDragging = false;
+    };
+    
+    // 点击进度条时移动滑块
+    const moveSliderOnClick = (e) => {
+      let rect = chartContainer.value.getBoundingClientRect();
+      let x = e.clientX - rect.left;
+      x = Math.max(0, Math.min(x, chartContainer.value.offsetWidth - slider.value.offsetWidth));
+      updateSliderPosition(x);
+
+      // 滑块儿位置更新后，调用move事件，同步渲染里程气泡并且回传数据给到回调函数
+      onSliderMove(props.onMove);
+      
+    };
   
     // 拖动滑块时的回调函数
     const onSliderMove = (callback) => {
@@ -225,8 +229,8 @@
             const dataPoints = calculateDataPoints();
             const sliderLeft = slider.value.offsetLeft;
             const closestIndex = dataPoints.reduce((closest, pointX, index) => {
-            const dist = Math.abs(sliderLeft - pointX);
-            return dist < Math.abs(sliderLeft - dataPoints[closest]) ? index : closest;
+              const dist = Math.abs(sliderLeft - pointX);
+              return dist < Math.abs(sliderLeft - dataPoints[closest]) ? index : closest;
             }, 0);
 
             //计算已行进的里程
