@@ -40,7 +40,7 @@ var config={
     ,//速度由慢到快的24级颜色代码。
     samplePointsNum:200,//轨迹采样数。用于控制返回值samplePoints的长度。samplePoints用于渲染轨迹使用
 
-
+    useUniApp:false,//此处如果为true，则代表使用uniapp环境，一些网络请求会以uniapp的方式进行调用
     openDebug:false,//开启调试后打印调试信息
 }
 
@@ -199,6 +199,7 @@ async function innerOptimize(gpsPoints) {
   }
 
   //计算速度和里程
+  let totalMileage=0
   for (let i = 0; i < finalPoints.length-1; i++) {
     //速度
     if(finalPoints[i].type=='add'&&finalPoints[i+1].type=='add'){//如果两个点都是添加进去的点，那就不计算速度
@@ -210,6 +211,7 @@ async function innerOptimize(gpsPoints) {
     //里程
     let mileage = calculateDistance(finalPoints[i], finalPoints[i + 1])
     finalPoints[i].mileage=mileage;
+    totalMileage+=mileage
   }
 
   var trajectoryPoints = []
@@ -230,7 +232,8 @@ async function innerOptimize(gpsPoints) {
     "startPoint":finalPoints[0],//开始点
     "endPoint":finalPoints[finalPoints.length-1],//结束点
     "samplePoints":samplePoints(finalPoints),//轨迹抽样数据（固定数量）
-    "avgSpeed":avgSpeed
+    "avgSpeed":avgSpeed,
+    "totalMileage":totalMileage
   }; 
 }
 
@@ -499,8 +502,16 @@ async function mapServicePlan(pointGroup,mapService){
  */
 async function amapServicePlan(startPoint, endPoint) {
   try {
-    const response = await fetch(`https://restapi.amap.com/v3/direction/walking?key=${config.aMapKey}&origin=${startPoint.lng},${startPoint.lat}&destination=${endPoint.lng},${endPoint.lat}`);
-    const data = await response.json();
+    
+    let data = {}
+    //适配uniapp的方式进行请求
+    if(config.useUniApp){
+      data = await amapServicePlanFetch(startPoint, endPoint);
+    }else{
+      const response = await fetch(`https://restapi.amap.com/v3/direction/walking?key=${config.aMapKey}&origin=${startPoint.lng},${startPoint.lat}&destination=${endPoint.lng},${endPoint.lat}`);
+      data = await response.json();
+    }
+
     if (data.status === '1') { // 成功
       const paths = data.route.paths;
       if (paths.length > 0) {
@@ -518,6 +529,27 @@ async function amapServicePlan(startPoint, endPoint) {
     console.error('amapServicePlan Error:', error);
     throw error;
   }
+}
+
+function amapServicePlanFetch(startPoint, endPoint) {
+  return new Promise((resolve, reject) => {
+      uni.request({
+          url: `https://restapi.amap.com/v3/direction/walking?key=${config.aMapKey}&origin=${startPoint.lng},${startPoint.lat}&destination=${endPoint.lng},${endPoint.lat}`,
+          header: {
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest'
+          },
+          method: 'GET',
+          sslVerify: true,
+          success: ({ data, statusCode, header }) => {
+              resolve(data)
+          },
+          fail: (error) => { }
+      })
+
+  })
+
 }
 
 /**
@@ -550,8 +582,15 @@ async function gmapServicePlan(points) {
 
   let path = points.map(item => `${item.point.lat},${item.point.lng}`).join('|');  
 
-  const response = await fetch(`https://roads.googleapis.com/v1/snapToRoads?key=${config.gMapKey}&interpolate=true&path=${path}`);
-  const data = await response.json();
+  let data = {}
+  //适配uniapp的方式进行请求
+  if(config.useUniApp){
+    data = await gmapServicePlanFetch(path);
+  }else{
+    const response = await fetch(`https://roads.googleapis.com/v1/snapToRoads?key=${config.gMapKey}&interpolate=true&path=${path}`);
+    data = await response.json();
+  }
+
   let resultPoints = [];
   if(data&&data.snappedPoints&&data.snappedPoints.length>0){
     data.snappedPoints.map(item=>{
@@ -564,6 +603,25 @@ async function gmapServicePlan(points) {
     })
   }
   return resultPoints
+}
+
+function gmapServicePlanFetch(path) {
+  return new Promise((resolve, reject) => {
+      uni.request({
+          url: `https://roads.googleapis.com/v1/snapToRoads?key=${config.gMapKey}&interpolate=true&path=${path}`,
+          header: {
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest'
+          },
+          method: 'GET',
+          sslVerify: true,
+          success: ({ data, statusCode, header }) => {
+              resolve(data)
+          },
+          fail: (error) => { }
+      })
+  })
 }
 
 
@@ -1028,7 +1086,15 @@ async function calculateAvgSpeed(points) {
 /**
  * 计算速度区间
  */
-async function getSpeedRanges(speeds) {
+async function getSpeedRanges(speeds,totalMileage) {
+  //根据总里程的长短控制最多显示的颜色级别。避免过短的轨迹由于gps精度问题显示的颜色太跳跃
+  let maxColorLevel= config.speedColors.length
+  if(totalMileage<10*1000){//10KM内只渲染前30%的色域
+    maxColorLevel = Math.ceil(config.speedColors.length*0.3)
+  }else if(totalMileage<30*1000){//10~30KM渲染前60%的色域
+    maxColorLevel = Math.ceil(config.speedColors.length*0.6)
+  }
+
   // 去掉速度为0的重复值
   speeds = speeds.filter((value, index, self) => value !== 0 || self.indexOf(value) === index);
 
@@ -1041,10 +1107,10 @@ async function getSpeedRanges(speeds) {
   // 重新获取最小速度和最大速度
   var minSpeed = Math.min(...speeds);
   var maxSpeed = Math.max(...speeds);
-  var rangeStep = (maxSpeed - minSpeed) / config.speedColors.length;
+  var rangeStep = (maxSpeed - minSpeed) / maxColorLevel;
 
   var speedRanges = [];
-  for (var i = 0; i < config.speedColors.length; i++) {
+  for (var i = 0; i < maxColorLevel; i++) {
       speedRanges.push(minSpeed + rangeStep * (i + 1));
   }
   return speedRanges;
@@ -1067,11 +1133,17 @@ function determineSpeedRange(speed, ranges) {
  */
 async function processTrajectory(finalPoints) {
   var speeds = [];
+  let totalMileage = 0;//总里程 单位米
   for (var i = 0; i < finalPoints.length - 1; i++) {
+    totalMileage+=parseFloat(finalPoints[i].mileage)
     speeds.push(finalPoints[i].speed);
   }
+
+  if(config.openDebug){
+    console.log("总里程",totalMileage)
+  }
   
-  var speedRanges = await getSpeedRanges(speeds);
+  var speedRanges = await getSpeedRanges(speeds,totalMileage);
 
   var result = [];
   var currentSegment = { color: "", path: [], type: "general" };
@@ -1116,7 +1188,8 @@ async function processTrajectory(finalPoints) {
       }
   }
 
-  return result;
+  //最后进行颜色平滑过渡处理
+  return result
 }
 
 /**

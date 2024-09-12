@@ -20,6 +20,7 @@
   },
   "homepage": "https://github.com/Observe-secretly/GpsPathTransfigure#readme",
   "dependencies": {
+    "chroma-js": "^3.1.1",
     "moment": "^2.30.1"
   },
   "devDependencies": {

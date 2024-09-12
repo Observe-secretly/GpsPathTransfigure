@@ -30,6 +30,7 @@
 <script setup>
     import { ref, onMounted } from 'vue';
     import GpsPathTransfigure from "/index.js"
+    import chroma from "chroma-js";
     // 状态变量：true表示播放，false表示暂停
     let isPlaying = ref(false);
     // 运动速度
@@ -204,7 +205,7 @@
             locale:'en',
             gMapKey:apiKey,
             defaultMapService:'gmap',
-            openDebug:true,
+            openDebug:false,
             smoothness:true,
             pathColorOptimize:true,
         })
@@ -234,9 +235,8 @@
         for(var i=0;i<trajectoryPoints.length;i+=1){
             let item = trajectoryPoints[i]
             
-            let flightPath = null
             if(item.type=='add'){
-                flightPath = new google.maps.Polyline({
+                new google.maps.Polyline({
                     path: item.path,
                     strokeColor: '#959595',
                     strokeOpacity: 0.3,
@@ -248,16 +248,39 @@
                         repeat: '30px' // 每隔多少px重复显示箭头
                         }
                     ]
-                });
+                }).setMap(map);
+
             }else{
-                flightPath = new google.maps.Polyline({
-                    path: item.path,
-                    strokeColor: item.color,
-                    strokeOpacity: 0.8,
-                    strokeWeight: 4,
-                });
+                // 处理渐变色部分
+                let nextItem = trajectoryPoints[i + 1]; // 获取下一个轨迹片段
+                let nextColor = nextItem ? nextItem.color : item.color; // 如果没有下一个，则保持当前颜色
+
+                let segmentCount = 10; // 将路径分成10段
+                // 使用Chroma.js生成颜色过渡数组
+                let gradientColors = chroma.scale([item.color, nextColor?nextColor:'#959595']).colors(segmentCount);
+
+                for (let k = 0; k < segmentCount; k++) {
+                    let startFactor = k / segmentCount;
+                    let endFactor = (k + 1) / segmentCount;
+                    
+                    let segmentPath = [
+                        item.path[Math.floor(startFactor * (item.path.length - 1))],
+                        item.path[Math.floor(endFactor * (item.path.length - 1))]
+                    ];
+
+                    let segmentColor = gradientColors[k]; // 取Chroma.js生成的渐变颜色
+
+                    // 渲染每个小线段
+                    new google.maps.Polyline({
+                        path: segmentPath,
+                        strokeColor: segmentColor,
+                        strokeOpacity: 0.8,
+                        strokeWeight: 4,
+                    }).setMap(map);
+                    
+                }
+
             }
-            flightPath.setMap(map);
 
         }
 

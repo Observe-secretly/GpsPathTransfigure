@@ -39,6 +39,7 @@
   import { ref, onMounted } from 'vue';
   import ProgressChart from './component/ProgressChart.vue';
   import GpsPathTransfigure from "/index.js"
+  import chroma from "chroma-js";
   const segmentInfoData = ref([]);
   // 状态变量：true表示播放，false表示暂停
   let isPlaying = ref(false);
@@ -175,12 +176,12 @@
           locale:'zh',
           aMapKey:webApiKey,
           defaultMapService:'amap',
-          openDebug:true,
+          openDebug:false,
           pathColorOptimize:true,
           samplePointsNum:300,
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
-        const { finalPoints, stopPoints,trajectoryPoints, center, zoom ,segmentInfo,startPoint,endPoint,samplePoints} = staticPoints;
+        const { finalPoints, stopPoints,trajectoryPoints, center, zoom ,segmentInfo,startPoint,endPoint,avgSpeed,totalMileage} = staticPoints;
         segmentInfoData.value = segmentInfo
         playPoints = finalPoints
 
@@ -233,41 +234,62 @@
           marker.setMap(map);
         }
 
-      for(var i=0;i<trajectoryPoints.length;i+=1){
-        let item = trajectoryPoints[i]
-        let path = []
-        for(var j=0;j<item.path.length;j+=1){
-          let point = item.path[j]
-          path.push([point.lng,point.lat])
+        for (var i = 0; i < trajectoryPoints.length; i += 1) {
+          let item = trajectoryPoints[i];
+          let path = [];
+          for (var j = 0; j < item.path.length; j += 1) {
+            let point = item.path[j];
+            path.push([point.lng, point.lat]);
+          }
+
+          if (item.type == 'add') {
+            // 处理虚线部分
+            var subLine = new AMap.BezierCurve({
+              path: path,
+              strokeColor: "#959595",
+              strokeOpacity: 0.3,
+              strokeWeight: 4,
+              strokeStyle: 'dashed',
+              zIndex: 50
+            });
+            map.add(subLine);
+          } else {
+            // 处理渐变色部分
+            let nextItem = trajectoryPoints[i + 1]; // 获取下一个轨迹片段
+            let nextColor = nextItem ? nextItem.color : item.color; // 如果没有下一个，则保持当前颜色
+
+            let segmentCount = 10; // 将路径分成10段
+            // 使用Chroma.js生成颜色过渡数组
+            let gradientColors = chroma.scale([item.color, nextColor?nextColor:'#959595']).colors(segmentCount);
+
+            for (let k = 0; k < segmentCount; k++) {
+              let startFactor = k / segmentCount;
+              let endFactor = (k + 1) / segmentCount;
+              
+              let segmentPath = [
+                [item.path[Math.floor(startFactor * (item.path.length - 1))].lng, item.path[Math.floor(startFactor * (item.path.length - 1))].lat],
+                [item.path[Math.floor(endFactor * (item.path.length - 1))].lng, item.path[Math.floor(endFactor * (item.path.length - 1))].lat]
+              ];
+
+              let segmentColor = gradientColors[k]; // 取Chroma.js生成的渐变颜色
+
+              console.log(segmentPath)
+
+              var subLine = new AMap.Polyline({
+                path: segmentPath,
+                strokeColor: segmentColor,
+                strokeWeight: 4,
+                lineJoin: 'round',
+                lineCap: 'round',
+                zIndex: 50
+              });
+
+              // 渲染每个小线段
+              map.add(subLine);
+            }
+          }
         }
 
-        var subLine = null 
-        if(item.type=='add'){
-          subLine = new AMap.BezierCurve({
-            path: path,
-            strokeColor: "#959595",
-            strokeOpacity: 0.3,
-            strokeWeight: 4,
-            strokeStyle: 'dashed',
-            zIndex: 50
-          });
-        }else{
-          subLine = new AMap.BezierCurve({
-          path: path,
-          strokeColor: item.color,
-          strokeOpacity: 0.5,
-          lineJoin: 'round',
-          lineCap:'round',
-          strokeOpacity: 1,
-          strokeWeight: 4,
-          geodesic:true,
-          zIndex: 50
-        });
-        }
-
-        // 渲染优化后的点
-        map.add(subLine);
-      }
 
 
       //初始化一个用于播放的marker点

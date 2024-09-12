@@ -24,6 +24,7 @@
 - 高性能。（异步架构）
 - 轨迹采样（为了让不同长度的轨迹渲染时长一致）
 - 随速自适应轨迹颜色（根据相对速度的不同，一段轨迹的快慢由蓝色到红色24种颜色标注出来）
+- 适配uniapp
 
 # 停留点计算原理
 ## 理论依据
@@ -97,6 +98,9 @@ import GpsPathTransfigure from "gpspathtransfigure"
 |pathColorOptimize|`Boolean`|true||是否开启轨迹颜色美化|
 |speedColors|`Array`| `["#3366FF", "#3369FF", "#336CFF", "#336FFF", "#3372FF", "#3375FF","#3399FF", "#33A3FF", "#33ADFF", "#33B7FF", "#33C1FF", "#33CCFF", "#66FF00", "#7FFF00", "#99FF00", "#B2FF00", "#CCFF00", "#E6FF00", "#FFCC00", "#FF9933", "#FF9966", "#FF6633", "#FF3300", "#FF0000"]`||速度由慢到快的24级颜色代码|
 |samplePointsNum|`Number`|200||轨迹采样数。用于控制返回值samplePoints的长度。samplePoints用于渲染轨迹使用|
+|useUniApp|`Boolean`|false||此处如果为true，则代表使用uniapp环境，一些网络请求会以uniapp的方式进行调用|
+
+
 
 ## 使用案例(Vue3)
 ``` javascript
@@ -175,6 +179,8 @@ import ProgressChart from 'gpspathtransfigure/src/component/ProgressChart.vue';
 |endPoint|结束点|
 |samplePoints|轨迹抽样数据（固定数量）|
 |avgSpeed|平均速度(去掉最小值和最大值)|
+|totalMileage|总里程|
+
 
 
 
