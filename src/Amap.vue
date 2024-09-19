@@ -273,8 +273,6 @@
 
               let segmentColor = gradientColors[k]; // 取Chroma.js生成的渐变颜色
 
-              console.log(segmentPath)
-
               var subLine = new AMap.Polyline({
                 path: segmentPath,
                 strokeColor: segmentColor,

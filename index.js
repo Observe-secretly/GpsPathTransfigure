@@ -26,7 +26,7 @@ var config={
     
     format : true,//是否格式化数据内容。如里程、时间信息。若开启则根据locale配置输出对应国家语言的信息的内容
     locale : 'zh',//设置语言
-    timeformat:'yyyy-MM-dd HH:mm:ss',//指定时间格式化方式
+    timeformat:'YYYY-MM-DD HH:mm:ss',//指定时间格式化方式
     mapWidth:1024,//地图容器的宽度
     mapHeight:768,//地图容器的高度
     defaultZoom:16,//默认地图缩放比。如果无法根据轨迹计算出缩放比，则使用次值
@@ -211,7 +211,7 @@ async function innerOptimize(gpsPoints) {
     //里程
     let mileage = calculateDistance(finalPoints[i], finalPoints[i + 1])
     finalPoints[i].mileage=mileage;
-    totalMileage+=mileage
+    totalMileage+=parseFloat(mileage)
   }
 
   var trajectoryPoints = []
@@ -219,7 +219,6 @@ async function innerOptimize(gpsPoints) {
   if(config.pathColorOptimize && finalPoints.length>0){
     trajectoryPoints = await processTrajectory(finalPoints)
   }
-  
 
   // 返回处理后的轨迹点数组
   return {
@@ -761,7 +760,6 @@ function calculateMilliseconds(time1, time2) {
 
   // 计算两个日期之间的毫秒值差异
   let milliseconds = Math.abs(date2 - date1);
-
   return milliseconds;
 }
 
