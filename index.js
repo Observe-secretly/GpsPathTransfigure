@@ -49,7 +49,7 @@ var config={
  * 计算两个点之间的距离
  * @param {*} point1 
  * @param {*} point2 
- * @returns 
+ * @returns 距离。单位米
  */
 function calculateDistance(point1, point2) {
   // 使用Haversine公式计算两个GPS点之间的距离
@@ -74,12 +74,12 @@ function formatDistance(meters) {
     const oneKilometer = 1000;
     // 如果小于1000米，显示多少米
     if (meters < oneKilometer) {
-        return `${meters}${getI18nValue(config.locale,'meter')}`;
+        return `${meters.toFixed(2)}${getI18nValue(config.locale,'meter')}`;
     }
 
     // 如果大于等于1000米，显示多少公里
-    let kilometers = (meters / oneKilometer).toFixed(2); // 保留两位小数
-    return `${kilometers}${getI18nValue(config.locale,'kilometer')}`;
+    let kilometers = meters / oneKilometer; // 保留两位小数
+    return `${kilometers.toFixed(2)}${getI18nValue(config.locale,'kilometer')}`;
 }
 
 /**
@@ -344,16 +344,46 @@ async function optimizeGetMapPlan(points,optimizePointsIndex,mapService){
 
     // 获取新的 GPS 点
     const newPoints = await mapServicePlan(group,mapService);
+
+    //若分组中包含停留点，则根据距离计算出停留点和补点轨迹中那个点最近，直接把对应的补点设置为停留点，其余的删除
+    group.map(item=>{
+      if(points[item.index].stopTimeSeconds){
+        // 计算距离最近的停留点
+        let distances =[]
+        for(let i=0;i<=newPoints.length;i++){
+          let newPoint = newPoints[i]
+          if(newPoint){
+            distances.push(calculateDistance(
+              newPoint,
+              points[item.index]
+            ))
+          }
+          
+        }
+        
+        //获取数组中最小的那个值的下标
+        const minIndex = distances.reduce((minIdx, currentValue, currentIndex) => 
+              currentValue < distances[minIdx] ? currentIndex : minIdx
+          , 0);
+
+        //停留点靠到补点上
+        newPoints[minIndex].stopTimeSeconds =  points[item.index].stopTimeSeconds
+        newPoints[minIndex].endPosition = points[item.index].endPosition
+        newPoints[minIndex].startPosition = points[item.index].startPosition
+        newPoints[minIndex].startTime = points[item.index].startTime
+        newPoints[minIndex].endTime = points[item.index].endTime
+        
+      }
+      
+      points[item.index].isDeleted=true
+      
+    })
+
+
     planPoints.push({
       index:index,
       points:newPoints
     })
-
-    //标记要删除的GPS
-    group.map(item=>{
-      points[item.index].isDeleted=true
-    })
-
 
   });
 

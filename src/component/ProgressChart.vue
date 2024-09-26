@@ -142,16 +142,13 @@
     existingLines.forEach(line => line.remove());
   
     const dataPoints = calculateDataPoints();
-    const maxStopTime = Math.max(...props.data.map(d => d.stopTimeSeconds || 0));
     props.data.forEach((point, index) => {
       if (point.stopTimeSeconds) {
-        let diffTime = calculateMilliseconds(point.startPosition.currentTime,point.endPosition.currentTime)/1000
-        
         const x = dataPoints[index];
-        const stopWidth = Math.min(10, 5 + diffTime * 2);
+        const stopWidth = 2;
         const stopLine = document.createElement('div');
         stopLine.className = 'stop-line';
-        stopLine.style.left = `${x - stopWidth / 2}px`;
+        stopLine.style.left = `${(x - stopWidth / 2)-3}px`;//向右偏移3px防止超出进度条
         stopLine.style.width = `${stopWidth}px`;
         stopLine.style.height = '100%';
         stopLine.style.top = '0';
