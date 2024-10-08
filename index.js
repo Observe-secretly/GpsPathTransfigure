@@ -81,6 +81,39 @@ function formatDistance(meters) {
     let kilometers = meters / oneKilometer; // 保留两位小数
     return `${kilometers.toFixed(2)}${getI18nValue(config.locale,'kilometer')}`;
 }
+// noiseRecognitionDistance
+function noiseRecognitionFilter(points) {
+  if (points.length <= 2) {
+      return points; // 如果点太少，无法计算平均值，直接返回
+  }
+
+  // 提取所有经纬度
+  const latitudes = points.map(point => point.lat);
+  const longitudes = points.map(point => point.lng);
+
+  // 计算最大值和最小值
+  const maxLat = Math.max(...latitudes);
+  const minLat = Math.min(...latitudes);
+  const maxLng = Math.max(...longitudes);
+  const minLng = Math.min(...longitudes);
+
+  // 计算平均值，去掉最大和最小
+  const avgLat = (latitudes.reduce((sum, lat) => sum + lat, 0) - maxLat - minLat) / (latitudes.length - 2);
+  const avgLng = (longitudes.reduce((sum, lng) => sum + lng, 0) - maxLng - minLng) / (longitudes.length - 2);
+
+  // 计算阈值，考虑正负
+  const latThreshold = Math.abs(avgLat * 0.5);
+  const lngThreshold = Math.abs(avgLng * 0.5);
+
+  // 过滤点，去掉超出范围的点
+  const filteredPoints = points.filter(point => {
+      const isLatValid = point.lat >= (avgLat - latThreshold) && point.lat <= (avgLat + latThreshold);
+      const isLngValid = point.lng >= (avgLng - lngThreshold) && point.lng <= (avgLng + lngThreshold);
+      return isLatValid && isLngValid;
+  });
+
+  return filteredPoints;
+}
 
 /**
  * 寻找停留点
@@ -88,6 +121,9 @@ function formatDistance(meters) {
  * @returns 
  */
 async function optimize(gpsPoints) {
+  //祛除噪点 
+  let newGpsPoints = noiseRecognitionFilter(gpsPoints)
+  
   if(config.autoOptimize){
     //反复渲染轨迹时，为了确保自动优化每次都生效，这里需要重置自动优化次数
     autoOptimizeCount = 0
@@ -96,7 +132,7 @@ async function optimize(gpsPoints) {
     config.stationaryEndPoints = 10
   }
   
-  return  innerOptimize(gpsPoints)
+  return  innerOptimize(newGpsPoints)
 }
 
 /**
@@ -1252,7 +1288,6 @@ function samplePoints(finalPoints) {
 
   return sampledPoints;
 }
-
 
 const GpsPathTransfigure = {
   conf:async (newConfig) => {
