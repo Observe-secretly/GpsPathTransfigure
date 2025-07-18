@@ -12,12 +12,13 @@ var config={
     stationaryEndPoints : 10, // 判断静止状态结束的连续点数
     autoOptimize : true, // 是否开启参数自动优化
     autoOptimizeMaxCount : 10,//自动优化调整次数
+    IQRThreshold:1.6,// 异常值检测阈值。此值通常要大于等于1.5
 
     proximityStopThreshold:35,// 近距离停留点距离阈值。此值通常要大于等于distanceThreshold
     proximityStopTimeInterval:60,//近距离停留点时间间隔阈值。单位分钟
     proximityStopMerge:true,// 近距离停留点合并。建议默认开启
     
-    smoothness:true,//是否开启停留点前后点位的轨迹补偿。你必须配置对应的地图密钥。否则无效。开启此项会额外消耗移动端流量，并且轨迹渲染速度也会降低
+    smoothness:false,//是否开启停留点前后点位的轨迹补偿。你必须配置对应的地图密钥。否则无效。开启此项会额外消耗移动端流量，并且轨迹渲染速度也会降低
     smoothnessAvgThreshold:1.6,//轨迹补偿距离倍数阈值。点之间的距离超过平均值的这个倍数后，才会被捕捉到进行轨迹补偿
     smoothnessLimitAvgSpeed:40,//开启轨迹补偿的最高平均速度。轨迹平均速度必须低于此值才会启用轨迹补偿
     aMapKey:'',// 配置高德地图可以调用jsapi路线规划的密钥
@@ -125,7 +126,7 @@ async function optimize(gpsPoints) {
   let newGpsPoints = noiseRecognitionFilter(gpsPoints)
   
   if(config.autoOptimize){
-    //反复渲染轨迹时，为了确保自动优化每次都生效，这里需要重置自动优化次数
+    //反复渲染轨迹时，为了确保自动优化每次都生效，需要重置自动优化次数
     autoOptimizeCount = 0
     //自动优化的配置项重置
     config.distanceThreshold = 35
@@ -183,8 +184,7 @@ async function innerOptimize(gpsPoints) {
         staticPointsSequence.push(gpsPoints[staticEndIndex]);
         staticEndIndex++;
       }
-
-      const centerPoint = calculateGeographicalCenter(staticPointsSequence);
+      const centerPoint = calculateGeographicalCenter(staticPointsSequence);//这个中心点就是质心。是停留点
       finalPoints.push(centerPoint); // 将中心点加入结果数组
       i = staticEndIndex; // 跳到静止状态结束的点继续处理
     } else {
@@ -231,7 +231,6 @@ async function innerOptimize(gpsPoints) {
     if(avgSpeed<config.smoothnessLimitAvgSpeed){
       finalPoints = await smoothness(finalPoints)
     }
-    
   }
 
   //计算速度和里程
@@ -248,6 +247,16 @@ async function innerOptimize(gpsPoints) {
     let mileage = calculateDistance(finalPoints[i], finalPoints[i + 1])
     finalPoints[i].mileage=mileage;
     totalMileage+=parseFloat(mileage)
+  }
+
+  //找到里程异常大的点。剔除它
+  let mileageOutliers = detectMileageOutliers(finalPoints,config.IQRThreshold)
+  // 过滤掉里程小于distanceThreshold*2的异常点下标
+  mileageOutliers = mileageOutliers.filter(index => {
+    return finalPoints[index].mileage > config.distanceThreshold * 2
+  })
+  if(mileageOutliers.length>0){
+    finalPoints = removeIndices(finalPoints,mileageOutliers)
   }
 
   var trajectoryPoints = []
@@ -270,6 +279,107 @@ async function innerOptimize(gpsPoints) {
     "avgSpeed":avgSpeed,
     "totalMileage":totalMileage
   }; 
+}
+
+/**
+ * 从原数组中剔除指定下标的元素
+ * @param {Array} arr - 原数组
+ * @param {Array<number>} indicesToRemove - 要移除的下标数组
+ * @returns {Array} - 新数组（不包含指定下标的元素）
+ */
+function removeIndices(arr, indicesToRemove) {
+  const removeSet = new Set(indicesToRemove);
+  return arr.filter((_, index) => !removeSet.has(index));
+}
+
+/**
+ * 检测 GPS 数据中 mileage 异常大的点
+ * @param {Array} data - GPS 点数组，每个对象包含 lat, lng, currentTime, speed, mileage
+ * @param {number} k - IQR 阈值倍数（默认 1.5）
+ * @returns {Array<number>} - 异常点的下标数组
+ */
+function detectMileageOutliers(data, k = 1.5) {
+  const mileages = data.map(p => p.mileage).filter(m => m != null);
+
+  if (mileages.length < 4) return [];
+
+  const sorted = [...mileages].sort((a, b) => a - b);
+
+  const q1 = percentile(sorted, 25);
+  const q3 = percentile(sorted, 75);
+  const iqr = q3 - q1;
+  const threshold = q3 + k * iqr;
+
+  return data
+    .map((point, index) => (point.mileage > threshold ? index : -1))
+    .filter(index => index !== -1);
+}
+
+/**
+ * 百分位数计算（线性插值）
+ * @param {Array<number>} sortedNums - 升序数组
+ * @param {number} p - 百分位（0-100）
+ * @returns {number}
+ */
+function percentile(sortedNums, p) {
+  const n = sortedNums.length;
+  const rank = (p / 100) * (n - 1);
+  const lower = Math.floor(rank);
+  const upper = lower + 1;
+  const weight = rank - lower;
+
+  if (upper >= n) return sortedNums[lower];
+  return sortedNums[lower] * (1 - weight) + sortedNums[upper] * weight;
+}
+
+/**
+ * 计算两个GPS点之间的方向角（以正北为0度，顺时针方向）
+ * @param {Object} point1 起始点 {lat, lng}
+ * @param {Object} point2 目标点 {lat, lng}
+ * @returns {Number} 方向角（度），范围0-360
+ */
+function calculateBearing(point1, point2) {
+  const lat1 = degreesToRadians(point1.lat);
+  const lat2 = degreesToRadians(point2.lat);
+  const deltaLng = degreesToRadians(point2.lng - point1.lng);
+  
+  const y = Math.sin(deltaLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLng);
+  
+  let bearing = Math.atan2(y, x);
+  bearing = radiansToDegrees(bearing);
+  
+  // 转换为0-360度范围
+  return (bearing + 360) % 360;
+}
+
+/**
+ * 根据起始点、方向角和距离计算目标点坐标
+ * @param {Object} startPoint 起始点 {lat, lng}
+ * @param {Number} bearing 方向角（度）
+ * @param {Number} distance 距离（米）
+ * @returns {Object} 目标点坐标 {lat, lng}
+ */
+function calculateDestinationPoint(startPoint, bearing, distance) {
+  const R = 6371e3; // 地球半径（米）
+  const lat1 = degreesToRadians(startPoint.lat);
+  const lng1 = degreesToRadians(startPoint.lng);
+  const bearingRad = degreesToRadians(bearing);
+  
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(distance / R) +
+    Math.cos(lat1) * Math.sin(distance / R) * Math.cos(bearingRad)
+  );
+  
+  const lng2 = lng1 + Math.atan2(
+    Math.sin(bearingRad) * Math.sin(distance / R) * Math.cos(lat1),
+    Math.cos(distance / R) - Math.sin(lat1) * Math.sin(lat2)
+  );
+  
+  return {
+    lat: radiansToDegrees(lat2),
+    lng: radiansToDegrees(lng2)
+  };
 }
 
 /**
@@ -761,7 +871,7 @@ function proximityStopMerge(points){
 }
 
 /**
- * 计算GPS坐标序列的理论中心点
+ * 计算GPS坐标序列的理论中心点(也就是停留点)
  * @param {*} points 
  * @returns 
  */
@@ -1114,7 +1224,6 @@ async function calculateAvgSpeed(points) {
       newPoints.push(item);
     }
   });
-
   if (newPoints.length < 2) {
     return 0; // 如果有效的点少于2个，返回0
   }

@@ -81,6 +81,7 @@ import GpsPathTransfigure from "gpspathtransfigure"
 |stationaryEndPoints |`Number`| 10|`是`| 判断静止状态结束的连续点数 |
 |autoOptimize |`Boolean`| true|| 是否开启参数自动优化 |
 |autoOptimizeMaxCount |`Number`| 10||自动优化调整次数上限|
+|IQRThreshold |`Number`| 1.6||(四分位距)异常值检测阈值|
 |proximityStopThreshold|`Number`|35|| 近距离停留点距离阈值。此值通常要大于等于distanceThreshold|
 |proximityStopTimeInterval|`Number`|60||近距离停留点时间间隔阈值。单位`分钟`|
 |proximityStopMerge|`Boolean`|true|| 近距离停留点合并。建议默认开启|
