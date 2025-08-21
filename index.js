@@ -219,35 +219,8 @@ async function innerOptimize(gpsPoints) {
     }
   }
 
-  // 抛开停留点计算整个里程的平均速度
-  let avgSpeed = await calculateAvgSpeed(finalPoints)
-  if(config.openDebug){
-    console.log("平均速度："+avgSpeed)
-  }
-  
-  // 停留点前后点位的轨迹补偿
-  if(config.smoothness && finalPoints.length>3){
-    //如果平均速度高于15公里（缺省值）每小时，则不进行轨迹补偿过渡。过快的速度在进行轨迹补偿时会和实际轨迹相差巨大
-    if(avgSpeed<config.smoothnessLimitAvgSpeed){
-      finalPoints = await smoothness(finalPoints)
-    }
-  }
-
   //计算速度和里程
-  let totalMileage=0
-  for (let i = 0; i < finalPoints.length-1; i++) {
-    //速度
-    if(finalPoints[i].type=='add'&&finalPoints[i+1].type=='add'){//如果两个点都是添加进去的点，那就不计算速度
-      finalPoints[i].speed=0;
-    }else{
-      let speed = await calculateSpeed(finalPoints[i], finalPoints[i + 1])
-      finalPoints[i].speed=speed;
-    }
-    //里程
-    let mileage = calculateDistance(finalPoints[i], finalPoints[i + 1])
-    finalPoints[i].mileage=mileage;
-    totalMileage+=parseFloat(mileage)
-  }
+  let totalMileage = await calculateSpeedAndMileage(finalPoints)
 
   //找到里程异常大的点。剔除它
   let mileageOutliers = detectMileageOutliers(finalPoints,config.IQRThreshold)
@@ -259,17 +232,56 @@ async function innerOptimize(gpsPoints) {
     finalPoints = removeIndices(finalPoints,mileageOutliers)
   }
 
-  var trajectoryPoints = []
+  let trajectoryPoints = []
   // 对轨迹进行颜色渲染。根据轨迹的速度不同，自适应颜色进行渲染
   if(config.pathColorOptimize && finalPoints.length>0){
     trajectoryPoints = await processTrajectory(finalPoints)
   }
 
+  //因为剔除了异常点所以要再次计算速度和里程。
+  totalMileage = await calculateSpeedAndMileage(finalPoints)
+
+  //再次找到里程异常大的点。对完整的finalPoints轨迹进行切割
+  let mileageOutliersCut = detectMileageOutliers(finalPoints,config.IQRThreshold)
+  //根据mileageOutliersCut异常点下标把finalPoints切割成一个包含多个轨迹段的二维数组。
+  let finalPointsSegments= []
+  let trajectoryPointsSegments=[]
+  if(mileageOutliersCut.length>0){//存在异常点
+    finalPointsSegments = splitTrajectoryByOutliers(finalPoints, mileageOutliersCut);
+    //分别计算每个轨迹的颜色渲染轨迹
+    for (let i = 0; i < finalPointsSegments.length; i++) {
+      let trajectoryPointsSegment = await processTrajectory(finalPointsSegments[i])
+      trajectoryPointsSegments.push(trajectoryPointsSegment)
+    }
+  }
+
+  //如果不存在异常点，就把finalPoints作为一个轨迹段
+  if(finalPointsSegments.length==0){//若不存在异常点，就把finalPoints作为一个轨迹段
+    finalPointsSegments.push(finalPoints)
+    trajectoryPointsSegments.push(trajectoryPoints)
+  }
+
+  // 抛开停留点计算整个里程的平均速度
+  let avgSpeed = await calculateAvgSpeed(finalPoints)
+  if(config.openDebug){
+    console.log("平均速度："+avgSpeed)
+  }
+
+  // 停留点前后点位的轨迹补偿
+  if(config.smoothness && finalPoints.length>3){
+    //如果平均速度高于15公里（缺省值）每小时，则不进行轨迹补偿过渡。过快的速度在进行轨迹补偿时会和实际轨迹相差巨大
+    if(avgSpeed<config.smoothnessLimitAvgSpeed){
+      finalPoints = await smoothness(finalPoints)
+    }
+  }
+
   // 返回处理后的轨迹点数组
   return {
     "finalPoints": finalPoints,//优化后的轨迹
-    "stopPoints" : stopPoints,//所有的停留点
     "trajectoryPoints":trajectoryPoints,//优化后根据速度进行拆分的轨迹信息
+    "finalPointsSegments": finalPointsSegments,//优化后的轨迹。（根据异常点进行切割的多段轨迹）
+    "trajectoryPointsSegments":trajectoryPointsSegments,//优化后根据速度进行拆分的轨迹信息。（根据异常点进行切割的多段轨迹）
+    "stopPoints" : stopPoints,//所有的停留点
     "center":calculateCentroid(finalPoints),//中心点
     'zoom':calculateZoom(calculateBoundingBox(finalPoints), config.mapWidth, config.mapHeight),//缩放比
     "segmentInfo":generateSegmentInfo(finalPoints),//分段信息
@@ -279,6 +291,39 @@ async function innerOptimize(gpsPoints) {
     "avgSpeed":avgSpeed,
     "totalMileage":totalMileage
   }; 
+}
+
+/**
+ * 根据异常点下标将轨迹切割成多个段
+ * @param {Array} points - 轨迹点数组
+ * @param {Array<number>} outlierIndices - 异常点的下标数组
+ * @returns {Array<Array>} - 切割后的轨迹段二维数组
+ */
+function splitTrajectoryByOutliers(points, outlierIndices) {
+  let segments = [];
+  
+  if (outlierIndices.length > 0) {
+    // 按照索引从小到大排序
+    outlierIndices.sort((a, b) => a - b);
+    
+    // 第一段：从开始到第一个异常点
+    segments.push(points.slice(0, outlierIndices[0] + 1));
+    
+    // 中间段：从一个异常点到下一个异常点
+    for (let i = 0; i < outlierIndices.length - 1; i++) {
+      segments.push(points.slice(outlierIndices[i] + 1, outlierIndices[i + 1] + 1));
+    }
+    
+    // 最后一段：从最后一个异常点到结束
+    segments.push(points.slice(outlierIndices[outlierIndices.length - 1] + 1));
+  } else {
+    // 如果没有异常点，整个轨迹作为一段
+    segments.push(points);
+  }
+  
+  // 过滤掉长度小于等于3的轨迹段
+  segments = segments.filter(segment => segment.length > 3);
+  return segments;
 }
 
 /**
@@ -472,7 +517,6 @@ async function smoothnessOptimize(points,mapService){
 
   //optimizePointsIndex的长度代表需要调用多少次地图服务商接口规划路径。
   //所以这里要控制调用的最大次数，控制性能
-  // return await optimizeGetMapPlan(points,optimizePointsIndex);
   return await optimizeGetMapPlan(points,optimizePointsIndex,mapService);
 }
 
@@ -1160,43 +1204,6 @@ function generateSegmentInfo(positions) {
   return result;
 }
 
-
-
-/**
- * 比较 finalPoints 和 stopPoints，如果开始点和 stopPoints 的第一个点一样则删除 stopPoints 的第一个点；
- * 如果结束点和 stopPoints 的最后一个点一样，则删除 stopPoints 的最后一个点
- * @param {*} finalPoints 完整轨迹（包含停留点）
- * @param {*} stopPoints 停留点
- */
-function filterStopPoints(finalPoints, stopPoints) {
-  if(stopPoints==undefined || stopPoints.length==0){
-    return undefined;
-  }
-  // 比较开始点
-  if (finalPoints.length > 0 && stopPoints.length > 0) {
-    const finalStartPoint = finalPoints[0];
-    const stopFirstPoint = stopPoints[0];
-
-    // 如果 finalPoints 的开始点与 stopPoints 的第一个点相同，则删除 stopPoints 的第一个点
-    if (finalStartPoint.lat === stopFirstPoint.lat && finalStartPoint.lng === stopFirstPoint.lng) {
-      stopPoints.shift(); // 删除第一个元素
-    }
-  }
-
-  // 比较结束点
-  if (finalPoints.length > 0 && stopPoints.length > 0) {
-    const finalEndPoint = finalPoints[finalPoints.length - 1];
-    const stopLastPoint = stopPoints[stopPoints.length - 1];
-
-    // 如果 finalPoints 的结束点与 stopPoints 的最后一个点相同，则删除 stopPoints 的最后一个点
-    if (finalEndPoint.lat === stopLastPoint.lat && finalEndPoint.lng === stopLastPoint.lng) {
-      stopPoints.pop(); // 删除最后一个元素
-    }
-  }
-
-  return stopPoints;
-}
-
 /**
  * 计算两点之间的速度(公里/小时)
  * @param {*} point1 
@@ -1210,6 +1217,37 @@ async function calculateSpeed(point1, point2) {
     return (distance / timeDiff)*3.6; // 速度（公里/小时）
   }
   return 0;
+}
+
+/**
+ * 计算轨迹点的速度和里程
+ * @param {Array} points 轨迹点数组
+ * @returns {Number} 总里程（米）
+ */
+async function calculateSpeedAndMileage(points) {
+  // 记录开始时间
+  const startTime = Date.now()
+  
+  let totalMileage = 0
+  for (let i = 0; i < points.length-1; i++) {
+    //速度
+    if(points[i].type=='add'&&points[i+1].type=='add'){//如果两个点都是添加进去的点，那就不计算速度
+      points[i].speed=0;
+    }else{
+      let speed = await calculateSpeed(points[i], points[i + 1])
+      points[i].speed=speed;
+    }
+    //里程
+    let mileage = calculateDistance(points[i], points[i + 1])
+    points[i].mileage=mileage;
+    totalMileage+=parseFloat(mileage)
+  }
+
+  // 计算耗时并输出日志
+  const endTime = Date.now()
+  const timeSpent = endTime - startTime
+  console.log(`计算速度和里程完成,共耗时${timeSpent}毫秒`)
+  return totalMileage
 }
 
 /**
@@ -1228,13 +1266,11 @@ async function calculateAvgSpeed(points) {
     return 0; // 如果有效的点少于2个，返回0
   }
 
-  // 计算点和点之间的速度
-  let previousPoint = newPoints[0];
+  
+  // 获取速度集合
   let speeds = [];
   for (let index = 1; index < newPoints.length; index++) {
-    let speed = await calculateSpeed(previousPoint, newPoints[index]);
-    speeds.push(speed);
-    previousPoint = newPoints[index];
+    speeds.push(newPoints[index].speed);
   }
 
   // 去掉相同的最大值和最小值
