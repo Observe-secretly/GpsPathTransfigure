@@ -9,10 +9,9 @@
                     <p><strong>开始位置:</strong> Lat: {{ segment.startPosition.lat }}, Lng: {{ segment.startPosition.lng }}</p>
                     <p><strong>结束位置:</strong> Lat: {{ segment.endPosition.lat }}, Lng: {{ segment.endPosition.lng }}</p>
                     <p><strong>持续时间:</strong> {{ segment.duration }} </p>
-                    <p><strong>开始时间:</strong> {{ segment.startTime }}</p>
-                    <p><strong>结束时间:</strong> {{ segment.endTime }}</p>
-                    <p><strong>平均速度:</strong> {{ segment.averageSpeed }}</p>
-                    <p v-if="segment.type === 'motion'"><strong>距离:</strong> {{ segment.distance }} </p>
+                    <p><strong>时间:</strong> {{ segment.startTime }} - {{ segment.endTime }}</p>
+                    <p v-if="segment.type === 'motion'"><strong>平均速度/距离:</strong> {{ segment.averageSpeed }} / {{ segment.distance }}</p>
+                    <p v-else><strong>平均速度:</strong> {{ segment.averageSpeed }}</p>
                 </div>
                 </div>
             </div>
@@ -185,9 +184,6 @@
         return ret;
         }
 
-  
-
-  
 
     async function initMap() {
         let response = await fetch('/src/json/gmap.json');

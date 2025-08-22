@@ -20,14 +20,14 @@
   /* 创建一个可以横向滚动的容器 */
   .scroll-container {
     position: absolute;
-    top: 10px; /* 距离地图顶部的距离 */
+    top: 5px; /* 减小距离地图顶部的距离 */
     left: 10px; /* 距离地图左边的距离 */
     right: 10px; /* 距离地图右边的距离 */
     z-index: 1000; /* 确保它在地图上方 */
     background-color: rgba(255, 255, 255, 0.8); /* 使背景半透明 */
     border-radius: 8px;
-    padding: 10px;
-    max-height: 260px; /* 限制容器高度 */
+    padding: 5px;
+    max-height: 150px; /* 限制容器高度，减小高度以便更好地查看地图 */
     overflow-y: auto; /* 启用滚动 */
   }
 
@@ -49,7 +49,7 @@
   .card-container {
     display: flex;
     flex-direction: row;
-    gap: 10px; /* 卡片之间的间隔 */
+    gap: 5px; /* 减小卡片之间的间隔 */
     width: 100%; /* 设置为屏幕宽度的 100% */
     box-sizing: border-box; /* 包括内边距和边框在内 */
   }
@@ -59,7 +59,7 @@
     background: #fff; /* 卡片背景色 */
     border: 1px solid #ddd; /* 边框颜色 */
     border-radius: 8px; /* 圆角 */
-    padding: 15px; /* 内边距 */
+    padding: 5px; /* 减小内边距使卡片更紧凑 */
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* 卡片阴影 */
     flex-shrink: 0; /* 防止卡片被压缩 */
   }
@@ -67,14 +67,14 @@
   /* 卡片标题 */
   .card-header {
     font-weight: bold;
-    margin-bottom: 10px; /* 标题和内容之间的间距 */
-    font-size: 16px; /* 标题字体大小 */
+    margin-bottom: 2px; /* 减小标题和内容之间的间距 */
+    font-size: 13px; /* 减小标题字体大小 */
   }
 
   /* 卡片内容 */
   .card-body p {
-    margin: 5px 0; /* 内容段落的间距 */
-    font-size: 14px; /* 内容字体大小 */
+    margin: 3px 0; /* 减小内容段落的间距 */
+    font-size: 12px; /* 内容字体大小 */
   }
 
   /* 悬浮按钮的基础样式 */

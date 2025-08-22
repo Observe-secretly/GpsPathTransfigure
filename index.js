@@ -279,10 +279,11 @@ async function innerOptimize(gpsPoints) {
   finalPoints = mergedTrajectories.finalPoints;
   trajectoryPoints = mergedTrajectories.trajectoryPoints;
 
-  // 重新计算平均速度和总里程
+  // 重新计算平均速度和总里程。通过分段计算每个轨迹的平均速度和总里程，最后再进行累加
+  // 这样做会让平均速度和总里程更加精准。因为分段轨迹已经去掉了异常点和中途信号丢失的轨迹片段
   if(finalPointsSegments.length>1){
-    avgSpeed = await calculateAvgSpeed(finalPoints)
-    totalMileage = await calculateSpeedAndMileage(finalPoints)
+    avgSpeed = await calculateMultipleTrajectoryAvgSpeed(finalPointsSegments)
+    totalMileage = await calculateMultipleTrajectoryMileage(finalPointsSegments)
   }
 
   // 返回处理后的轨迹点数组
@@ -1334,8 +1335,38 @@ async function calculateSpeedAndMileage(points) {
 }
 
 /**
+ * 并行计算多条轨迹的总里程并返回总和
+ * @param {Array<Array>} trajectories 多条轨迹点数组的数组
+ * @returns {Number} 所有轨迹的总里程之和（米）
+ */
+async function calculateMultipleTrajectoryMileage(trajectories) {
+  // 记录开始时间
+  const startTime = Date.now()
+  
+  // 使用Promise.all并行处理多条轨迹
+  const mileageResults = await Promise.all(
+    trajectories.map(async (trajectory) => {
+      return await calculateSpeedAndMileage(trajectory)
+    })
+  )
+  
+  // 计算所有轨迹的总里程之和
+  const totalMileage = mileageResults.reduce((sum, mileage) => sum + parseFloat(mileage), 0)
+  
+  // 计算耗时并输出日志
+  const endTime = Date.now()
+  const timeSpent = endTime - startTime
+  if(config.openDebug){
+    console.log(`并行计算${trajectories.length}条轨迹的速度和里程完成,总里程${totalMileage}米,共耗时${timeSpent}毫秒`)
+  }
+
+  return totalMileage.toFixed(2);
+}
+
+/**
  * 计算GPS轨迹的平均速度
  * @param {*} points 
+ * @returns {Number} 平均速度（公里/小时）
  */
 async function calculateAvgSpeed(points) {
   let newPoints = [];
@@ -1372,6 +1403,39 @@ async function calculateAvgSpeed(points) {
   let averageSpeed = sum / filteredSpeeds.length;
 
   return averageSpeed;
+}
+
+/**
+ * 并行计算多条轨迹的平均速度并返回总平均值
+ * @param {Array<Array>} trajectories 多条轨迹点数组的数组
+ * @returns {Number} 所有轨迹平均速度的平均值（公里/小时）
+ */
+async function calculateMultipleTrajectoryAvgSpeed(trajectories) {
+  // 记录开始时间
+  const startTime = Date.now()
+  
+  // 使用Promise.all并行处理多条轨迹
+  const avgSpeedResults = await Promise.all(
+    trajectories.map(async (trajectory) => {
+      return await calculateAvgSpeed(trajectory)
+    })
+  )
+  
+  // 计算所有轨迹平均速度的平均值
+  const validSpeeds = avgSpeedResults.filter(speed => speed > 0);
+  const avgSpeed = validSpeeds.length > 0 
+    ? validSpeeds.reduce((sum, speed) => sum + speed, 0) / validSpeeds.length 
+    : 0;
+  
+  // 计算耗时并输出日志
+  const endTime = Date.now()
+  const timeSpent = endTime - startTime
+  if(config.openDebug){
+    console.debug(`并行计算${trajectories.length}条轨迹的平均速度完成,总平均速度${avgSpeed.toFixed(2)}公里/小时,共耗时${timeSpent}毫秒`)
+  }
+  
+  
+  return avgSpeed.toFixed(2);
 }
 
 

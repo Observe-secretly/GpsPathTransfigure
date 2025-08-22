@@ -9,10 +9,9 @@
             <p><strong>开始位置:</strong> Lat: {{ segment.startPosition.lat }}, Lng: {{ segment.startPosition.lng }}</p>
             <p><strong>结束位置:</strong> Lat: {{ segment.endPosition.lat }}, Lng: {{ segment.endPosition.lng }}</p>
             <p><strong>持续时间:</strong> {{ segment.duration }} </p>
-            <p><strong>开始时间:</strong> {{ segment.startTime }}</p>
-            <p><strong>结束时间:</strong> {{ segment.endTime }}</p>
-            <p><strong>平均速度:</strong> {{ segment.averageSpeed }}</p>
-            <p v-if="segment.type === 'motion'"><strong>距离:</strong> {{ segment.distance }} </p>
+            <p><strong>时间:</strong> {{ segment.startTime }} - {{ segment.endTime }}</p>
+            <p v-if="segment.type === 'motion'"><strong>平均速度/距离:</strong> {{ segment.averageSpeed }} / {{ segment.distance }}</p>
+            <p v-else><strong>平均速度:</strong> {{ segment.averageSpeed }}</p>
           </div>
         </div>
       </div>
@@ -181,8 +180,9 @@
           samplePointsNum:300,
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
-        const { finalPoints,trajectoryPoints, stopPoints, center, zoom ,segmentInfo,startPoint,endPoint} = staticPoints;
-
+        const { finalPoints,trajectoryPoints, stopPoints, center, zoom ,segmentInfo,startPoint,endPoint,avgSpeed,totalMileage} = staticPoints;
+        console.log("平均速度"+avgSpeed)
+        console.log("总里程"+totalMileage)
         segmentInfoData.value = segmentInfo
         playPoints = finalPoints
 
@@ -245,14 +245,17 @@
 
           if (item.type == 'add' || item.type == 'drift') {
             // 处理虚线部分
-            var subLine = new AMap.BezierCurve({
+            var subLine = new AMap.Polyline({
               path: path,
-              strokeColor: "#959595",
-              strokeOpacity: 0.3,
+              strokeColor: '#959595',
+              strokeOpacity: 0.8,
               strokeWeight: 3,
               strokeStyle: 'dashed',
+              strokeDasharray: [1, 2],
+              borderWidth:1,
               zIndex: 50
             });
+
             map.add(subLine);
           } else {
             // 处理渐变色部分
@@ -289,10 +292,6 @@
           }
         }
         
-        
-
-
-
       //初始化一个用于播放的marker点
       moveMarker = new AMap.Marker({
         icon: new AMap.Icon({
