@@ -181,7 +181,7 @@
           samplePointsNum:300,
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
-        const { finalPoints,finalPointsSegments,trajectoryPointsSegments, stopPoints, center, zoom ,segmentInfo,startPoint,endPoint} = staticPoints;
+        const { finalPoints,trajectoryPoints, stopPoints, center, zoom ,segmentInfo,startPoint,endPoint} = staticPoints;
 
         segmentInfoData.value = segmentInfo
         playPoints = finalPoints
@@ -189,7 +189,7 @@
         var map = new AMap.Map('amapContainer', {
             resizeEnable: true,
             center:[center.lng,center.lat],
-            mapStyle: "amap://styles/light",
+            mapStyle: "amap://styles/macaron",
             zoom:zoom
         });
 
@@ -217,7 +217,7 @@
               imageSize: new AMap.Size(32, 32)
             }),
             position: [startPoint.lng, startPoint.lat],
-            offset: new AMap.Pixel(-16, -16)
+            offset: new AMap.Pixel(-16, -32)
           });
           marker.setMap(map);
         }
@@ -230,67 +230,65 @@
               imageSize: new AMap.Size(32, 32)
             }),
             position: [endPoint.lng, endPoint.lat],
-            offset: new AMap.Pixel(-16, -16)
+            offset: new AMap.Pixel(-16, -32)
           });
           marker.setMap(map);
         }
 
-        for (let segmentIndex = 0; segmentIndex < trajectoryPointsSegments.length; segmentIndex++) {
-          const trajectoryPoints = trajectoryPointsSegments[segmentIndex];
-          for (var i = 0; i < trajectoryPoints.length; i += 1) {
-            let item = trajectoryPoints[i];
-            let path = [];
-            for (var j = 0; j < item.path.length; j += 1) {
-              let point = item.path[j];
-              path.push([point.lng, point.lat]);
-            }
+        for (var i = 0; i < trajectoryPoints.length; i += 1) {
+          let item = trajectoryPoints[i];
+          let path = [];
+          for (var j = 0; j < item.path.length; j += 1) {
+            let point = item.path[j];
+            path.push([point.lng, point.lat]);
+          }
 
-            if (item.type == 'add') {
-              // 处理虚线部分
-              var subLine = new AMap.BezierCurve({
-                path: path,
-                strokeColor: "#959595",
-                strokeOpacity: 0.3,
-                strokeWeight: 4,
-                strokeStyle: 'dashed',
+          if (item.type == 'add' || item.type == 'drift') {
+            // 处理虚线部分
+            var subLine = new AMap.BezierCurve({
+              path: path,
+              strokeColor: "#959595",
+              strokeOpacity: 0.3,
+              strokeWeight: 3,
+              strokeStyle: 'dashed',
+              zIndex: 50
+            });
+            map.add(subLine);
+          } else {
+            // 处理渐变色部分
+            let nextItem = trajectoryPoints[i + 1]; // 获取下一个轨迹片段
+            let nextColor = nextItem ? nextItem.color : item.color; // 如果没有下一个，则保持当前颜色
+
+            let segmentCount = 10; // 将路径分成10段
+            // 使用Chroma.js生成颜色过渡数组
+            let gradientColors = chroma.scale([item.color, nextColor?nextColor:'#959595']).colors(segmentCount);
+
+            for (let k = 0; k < segmentCount; k++) {
+              let startFactor = k / segmentCount;
+              let endFactor = (k + 1) / segmentCount;
+              
+              let segmentPath = [
+                [item.path[Math.floor(startFactor * (item.path.length - 1))].lng, item.path[Math.floor(startFactor * (item.path.length - 1))].lat],
+                [item.path[Math.floor(endFactor * (item.path.length - 1))].lng, item.path[Math.floor(endFactor * (item.path.length - 1))].lat]
+              ];
+
+              let segmentColor = gradientColors[k]; // 取Chroma.js生成的渐变颜色
+
+              var subLine = new AMap.Polyline({
+                path: segmentPath,
+                strokeColor: segmentColor,
+                strokeWeight: 3,
+                lineJoin: 'round',
+                lineCap: 'round',
                 zIndex: 50
               });
+
+              // 渲染每个小线段
               map.add(subLine);
-            } else {
-              // 处理渐变色部分
-              let nextItem = trajectoryPoints[i + 1]; // 获取下一个轨迹片段
-              let nextColor = nextItem ? nextItem.color : item.color; // 如果没有下一个，则保持当前颜色
-
-              let segmentCount = 10; // 将路径分成10段
-              // 使用Chroma.js生成颜色过渡数组
-              let gradientColors = chroma.scale([item.color, nextColor?nextColor:'#959595']).colors(segmentCount);
-
-              for (let k = 0; k < segmentCount; k++) {
-                let startFactor = k / segmentCount;
-                let endFactor = (k + 1) / segmentCount;
-                
-                let segmentPath = [
-                  [item.path[Math.floor(startFactor * (item.path.length - 1))].lng, item.path[Math.floor(startFactor * (item.path.length - 1))].lat],
-                  [item.path[Math.floor(endFactor * (item.path.length - 1))].lng, item.path[Math.floor(endFactor * (item.path.length - 1))].lat]
-                ];
-
-                let segmentColor = gradientColors[k]; // 取Chroma.js生成的渐变颜色
-
-                var subLine = new AMap.Polyline({
-                  path: segmentPath,
-                  strokeColor: segmentColor,
-                  strokeWeight: 3,
-                  lineJoin: 'round',
-                  lineCap: 'round',
-                  zIndex: 50
-                });
-
-                // 渲染每个小线段
-                map.add(subLine);
-              }
             }
           }
         }
+        
         
 
 

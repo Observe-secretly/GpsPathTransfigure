@@ -12,9 +12,9 @@ var config={
     stationaryEndPoints : 10, // 判断静止状态结束的连续点数
     autoOptimize : true, // 是否开启参数自动优化
     autoOptimizeMaxCount : 10,//自动优化调整次数
-    IQRThreshold:1.6,// 异常值检测阈值。此值通常要大于等于1.5
+    IQRThreshold:1.5,// 异常值检测阈值。此值通常要大于等于1.5
 
-    proximityStopThreshold:35,// 近距离停留点距离阈值。此值通常要大于等于distanceThreshold
+    proximityStopThreshold:45,// 近距离停留点距离阈值。此值通常要大于等于distanceThreshold
     proximityStopTimeInterval:60,//近距离停留点时间间隔阈值。单位分钟
     proximityStopMerge:true,// 近距离停留点合并。建议默认开启
     
@@ -122,7 +122,7 @@ function noiseRecognitionFilter(points) {
  * @returns 
  */
 async function optimize(gpsPoints) {
-  //祛除噪点 
+  //去除噪点 
   let newGpsPoints = noiseRecognitionFilter(gpsPoints)
   
   if(config.autoOptimize){
@@ -221,8 +221,18 @@ async function innerOptimize(gpsPoints) {
 
   //计算速度和里程
   let totalMileage = await calculateSpeedAndMileage(finalPoints)
+  let avgSpeed = await calculateAvgSpeed(finalPoints)
 
-  //找到里程异常大的点。剔除它
+    // 停留点前后点位的轨迹补偿（需要使用API调用地图能力进行，会产生额外的费用）
+  if(config.smoothness && finalPoints.length>3){
+    //如果平均速度高于15公里（缺省值）每小时，则不进行轨迹补偿过渡。过快的速度在进行轨迹补偿时会和实际轨迹相差巨大
+    if(avgSpeed<config.smoothnessLimitAvgSpeed){
+      finalPoints = await smoothness(finalPoints)
+    }
+  }
+
+  //找到里程异常大的点。剔除它。
+  //核心的作用是剔除轨迹中的极端偏移毛刺。
   let mileageOutliers = detectMileageOutliers(finalPoints,config.IQRThreshold)
   // 过滤掉里程小于distanceThreshold*2的异常点下标
   mileageOutliers = mileageOutliers.filter(index => {
@@ -232,6 +242,7 @@ async function innerOptimize(gpsPoints) {
     finalPoints = removeIndices(finalPoints,mileageOutliers)
   }
 
+  // 初始化轨迹渲染点数组
   let trajectoryPoints = []
   // 对轨迹进行颜色渲染。根据轨迹的速度不同，自适应颜色进行渲染
   if(config.pathColorOptimize && finalPoints.length>0){
@@ -242,6 +253,7 @@ async function innerOptimize(gpsPoints) {
   totalMileage = await calculateSpeedAndMileage(finalPoints)
 
   //再次找到里程异常大的点。对完整的finalPoints轨迹进行切割
+  //某些偏移是行经中某一段信号丢失（隧道没信号、设备重启等）导致的点跨越极大的距离导致。这时删除不能解决问题。而是拆分轨迹。进行分别渲染或者虚化渲染
   let mileageOutliersCut = detectMileageOutliers(finalPoints,config.IQRThreshold)
   //根据mileageOutliersCut异常点下标把finalPoints切割成一个包含多个轨迹段的二维数组。
   let finalPointsSegments= []
@@ -261,18 +273,16 @@ async function innerOptimize(gpsPoints) {
     trajectoryPointsSegments.push(trajectoryPoints)
   }
 
-  // 抛开停留点计算整个里程的平均速度
-  let avgSpeed = await calculateAvgSpeed(finalPoints)
-  if(config.openDebug){
-    console.log("平均速度："+avgSpeed)
-  }
+  //基于finalPointsSegments和trajectoryPointsSegments把轨迹再次拼接起来刷新finalPoints完整轨迹
+  //目的是通过IQR去除异常点后，需要对完整轨迹进行刷新保证后面计算的平均速度和总里程更加准确
+  const mergedTrajectories = mergeTrajectorySegments(finalPointsSegments, trajectoryPointsSegments);
+  finalPoints = mergedTrajectories.finalPoints;
+  trajectoryPoints = mergedTrajectories.trajectoryPoints;
 
-  // 停留点前后点位的轨迹补偿
-  if(config.smoothness && finalPoints.length>3){
-    //如果平均速度高于15公里（缺省值）每小时，则不进行轨迹补偿过渡。过快的速度在进行轨迹补偿时会和实际轨迹相差巨大
-    if(avgSpeed<config.smoothnessLimitAvgSpeed){
-      finalPoints = await smoothness(finalPoints)
-    }
+  // 重新计算平均速度和总里程
+  if(finalPointsSegments.length>1){
+    avgSpeed = await calculateAvgSpeed(finalPoints)
+    totalMileage = await calculateSpeedAndMileage(finalPoints)
   }
 
   // 返回处理后的轨迹点数组
@@ -291,6 +301,79 @@ async function innerOptimize(gpsPoints) {
     "avgSpeed":avgSpeed,
     "totalMileage":totalMileage
   }; 
+}
+
+/**
+ * 合并轨迹段并添加连接线
+ * @param {Array<Array>} finalPointsSegments - 轨迹点段二维数组
+ * @param {Array<Array>} trajectoryPointsSegments - 轨迹渲染段二维数组
+ * @returns {Object} - 包含合并后的finalPoints和trajectoryPoints
+ */
+function mergeTrajectorySegments(finalPointsSegments, trajectoryPointsSegments) {
+  let finalPoints = [];
+  let trajectoryPoints = [];
+  
+  if (finalPointsSegments.length > 1) { // 大于1说明轨迹存在多段
+    // 合并finalPoints并添加连接线
+    for (let i = 0; i < finalPointsSegments.length; i++) {
+      let afterPathSegmentPath = finalPointsSegments[i-1];
+      let currentPathSegmentPath = finalPointsSegments[i];
+      
+      if (i > 0 && i < finalPointsSegments.length - 1) {
+        // 构造虚线连接相邻段
+        let driftPath = [
+          {
+            lng: afterPathSegmentPath[afterPathSegmentPath.length-1].lng,
+            lat: afterPathSegmentPath[afterPathSegmentPath.length-1].lat
+          },
+          {
+            lng: currentPathSegmentPath[0].lng,
+            lat: currentPathSegmentPath[0].lat
+          }
+        ];
+        // 注意：这里原代码有bug，应该是push而不是concat
+        finalPoints = finalPoints.concat(driftPath);
+      }
+      finalPoints = finalPoints.concat(currentPathSegmentPath);
+    }
+
+    // 合并trajectoryPoints并添加连接线
+    for (let i = 0; i < trajectoryPointsSegments.length; i++) {
+      let afterPathSegment = trajectoryPointsSegments[i-1];
+      let currentPathSegment = trajectoryPointsSegments[i];
+      
+      if (i > 0 && i < trajectoryPointsSegments.length - 1) {
+        let afterPath = afterPathSegment[afterPathSegment.length-1].path;
+        let currentPath = currentPathSegment[0].path;
+        
+        // 构造虚线连接相邻段
+        let driftPath = [
+          {
+            lng: afterPath[afterPath.length-1].lng,
+            lat: afterPath[afterPath.length-1].lat
+          },
+          {
+            lng: currentPath[0].lng,
+            lat: currentPath[0].lat
+          }
+        ];
+        
+        let driftPathSegment = {
+          path: driftPath,
+          type: 'drift'
+        };
+        
+        trajectoryPoints.push(driftPathSegment);
+      }
+      trajectoryPoints = trajectoryPoints.concat(currentPathSegment);
+    }
+  } else if (finalPointsSegments.length === 1) {
+    // 如果只有一段，直接使用
+    finalPoints = finalPointsSegments[0];
+    trajectoryPoints = trajectoryPointsSegments[0];
+  }
+  
+  return { finalPoints, trajectoryPoints };
 }
 
 /**
@@ -1325,7 +1408,12 @@ async function getSpeedRanges(speeds,totalMileage) {
   return speedRanges;
 }
 
-
+/**
+ * 根据速度和速度区间确定速度的颜色索引
+ * @param {*} speed 
+ * @param {*} ranges 
+ * @returns 
+ */
 function determineSpeedRange(speed, ranges) {
   for (var i = 0; i < ranges.length; i++) {
       if (speed <= ranges[i]) {
@@ -1380,9 +1468,9 @@ async function processTrajectory(finalPoints) {
           }
           // 创建新的段，从上一个段的最后一个点开始
           if(point2.type=='add'){
-            currentSegment = { color: "", path: [point2],type: "add" };
+            currentSegment = { color: "", path: [point1],type: "add" };
           }else{
-            currentSegment = { color: color, path: [point2],type: "general" };
+            currentSegment = { color: color, path: [point1],type: "general" };
           }
           
       }

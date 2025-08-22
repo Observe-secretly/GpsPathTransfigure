@@ -206,11 +206,11 @@
             gMapKey:apiKey,
             defaultMapService:'gmap',
             openDebug:false,
-            smoothness:true,
+            smoothness:false,
             pathColorOptimize:true,
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
-        const { finalPoints, stopPoints,finalPointsSegments,trajectoryPointsSegments,center, zoom ,segmentInfo,startPoint,endPoint,samplePoints} = staticPoints;
+        const { finalPoints, stopPoints,trajectoryPoints,center, zoom ,segmentInfo,startPoint,endPoint,samplePoints} = staticPoints;
         segmentInfoData.value = segmentInfo
         playPoints = finalPoints
 
@@ -232,61 +232,59 @@
             strokeColor: '#959595',
         };
 
-        for (let segmentIndex = 0; segmentIndex < trajectoryPointsSegments.length; segmentIndex++) {
-          const trajectoryPoints = trajectoryPointsSegments[segmentIndex];
-            for(var i=0;i<trajectoryPoints.length;i+=1){
-                let item = trajectoryPoints[i]
-                
-                if(item.type=='add'){
+        for(var i=0;i<trajectoryPoints.length;i+=1){
+            let item = trajectoryPoints[i]
+            
+            if(item.type=='add' || item.type=='drift'){
+                new google.maps.Polyline({
+                    path: item.path,
+                    strokeColor: '#959595',
+                    strokeOpacity: 0.3,
+                    strokeWeight: 3,
+                    icons: [
+                        {
+                        icon: lineSymbol,
+                        offset: '0%',
+                        repeat: '30px' // 每隔多少px重复显示箭头
+                        }
+                    ]
+                }).setMap(map);
+
+            }else{
+                // 处理渐变色部分
+                let nextItem = trajectoryPoints[i + 1]; // 获取下一个轨迹片段
+                let nextColor = nextItem ? nextItem.color : item.color; // 如果没有下一个，则保持当前颜色
+
+                let segmentCount = 10; // 将路径分成10段
+                // 使用Chroma.js生成颜色过渡数组
+                let gradientColors = chroma.scale([item.color, nextColor?nextColor:'#959595']).colors(segmentCount);
+
+                for (let k = 0; k < segmentCount; k++) {
+                    let startFactor = k / segmentCount;
+                    let endFactor = (k + 1) / segmentCount;
+                    
+                    let segmentPath = [
+                        item.path[Math.floor(startFactor * (item.path.length - 1))],
+                        item.path[Math.floor(endFactor * (item.path.length - 1))]
+                    ];
+
+                    let segmentColor = gradientColors[k]; // 取Chroma.js生成的渐变颜色
+
+                    // 渲染每个小线段
                     new google.maps.Polyline({
-                        path: item.path,
-                        strokeColor: '#959595',
-                        strokeOpacity: 0.3,
-                        strokeWeight: 4,
-                        icons: [
-                            {
-                            icon: lineSymbol,
-                            offset: '0%',
-                            repeat: '30px' // 每隔多少px重复显示箭头
-                            }
-                        ]
+                        path: segmentPath,
+                        strokeColor: segmentColor,
+                        strokeOpacity: 0.8,
+                        strokeWeight: 3,
                     }).setMap(map);
-
-                }else{
-                    // 处理渐变色部分
-                    let nextItem = trajectoryPoints[i + 1]; // 获取下一个轨迹片段
-                    let nextColor = nextItem ? nextItem.color : item.color; // 如果没有下一个，则保持当前颜色
-
-                    let segmentCount = 10; // 将路径分成10段
-                    // 使用Chroma.js生成颜色过渡数组
-                    let gradientColors = chroma.scale([item.color, nextColor?nextColor:'#959595']).colors(segmentCount);
-
-                    for (let k = 0; k < segmentCount; k++) {
-                        let startFactor = k / segmentCount;
-                        let endFactor = (k + 1) / segmentCount;
-                        
-                        let segmentPath = [
-                            item.path[Math.floor(startFactor * (item.path.length - 1))],
-                            item.path[Math.floor(endFactor * (item.path.length - 1))]
-                        ];
-
-                        let segmentColor = gradientColors[k]; // 取Chroma.js生成的渐变颜色
-
-                        // 渲染每个小线段
-                        new google.maps.Polyline({
-                            path: segmentPath,
-                            strokeColor: segmentColor,
-                            strokeOpacity: 0.8,
-                            strokeWeight: 3,
-                        }).setMap(map);
-                        
-                    }
-
+                    
                 }
 
             }
-        
+
         }
+        
+        
         
 
         stopPoints.map(item=>{
