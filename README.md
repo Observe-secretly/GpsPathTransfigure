@@ -171,17 +171,19 @@ import ProgressChart from 'gpspathtransfigure/src/component/ProgressChart.vue';
 ## 返回值说明
 |返回值|含义|
 |--|--|
-|finalPoints|轨迹。格式[{lon: xx, lat: xx, currentTime: xx}]，若坐标点中出现`type: 'add'`则代表此点是噪点轨迹补偿处理时的补点|
-|stopPoints|停留点。格式[{lon: xx, lat: xx, currentTime: xx}]|
-|trajectoryPoints|颜色渲染后的轨迹信息|
-|center|中心点。格式{lon: xx, lat: xx, currentTime: xx}|
-|zoom|缩放比|
-|segmentInfo|分段信息|
-|startPoint|开始点|
-|endPoint|结束点|
-|samplePoints|轨迹抽样数据（固定数量）|
-|avgSpeed|平均速度(去掉最小值和最大值)|
-|totalMileage|总里程|
+|finalPoints|优化后的轨迹。格式[{lng: xx, lat: xx, currentTime: xx}]，若坐标点中出现`type: 'add'`则代表此点是噪点轨迹补偿处理时的补点|
+|trajectoryPoints|优化后根据速度进行拆分的轨迹信息，用于颜色渲染。格式[{path: [{lng: xx, lat: xx}], color: xx, type: xx}]|
+|finalPointsSegments|优化后的轨迹（根据异常点进行切割的多段轨迹），是一个二维数组|
+|trajectoryPointsSegments|优化后根据速度进行拆分的轨迹信息（根据异常点进行切割的多段轨迹），是一个二维数组|
+|stopPoints|所有的停留点。格式[{lng: xx, lat: xx, currentTime: xx, startPosition: xx, endPosition: xx, startTime: xx, endTime: xx, stopTimeSeconds: xx}]|
+|center|中心点。格式{lng: xx, lat: xx}|
+|zoom|缩放比例，用于地图初始化时的缩放级别|
+|segmentInfo|分段信息，包含运动段和停留段的详细信息。格式[{type: "motion/stopped", startPosition: {lat: xx, lng: xx}, endPosition: {lat: xx, lng: xx}, duration: xx, startTime: xx, endTime: xx, distance: xx, averageSpeed: xx}]|
+|startPoint|轨迹的开始点，即finalPoints的第一个点|
+|endPoint|轨迹的结束点，即finalPoints的最后一个点|
+|samplePoints|轨迹抽样数据（固定数量），用于轨迹概览|
+|avgSpeed|平均速度(去掉最小值和最大值)，单位为km/h|
+|totalMileage|总里程，单位为m|
 
 
 

@@ -142,6 +142,8 @@ async function optimize(gpsPoints) {
  * @returns 
  */
 async function innerOptimize(gpsPoints) {
+
+  // 第一阶段：----------------------------------------------寻找停留点
   var finalPoints = []; // 存储最终的轨迹点
 
   let N=config.minComparisonPoints 
@@ -198,6 +200,8 @@ async function innerOptimize(gpsPoints) {
     finalPoints  = proximityStopMerge(finalPoints)
   }
   
+  // 第二阶段：----------------------------------------------初步获取停留点、总里程、平均速度以及参数自动调优过程
+
   //把停留点从坐标中单独提出来
   let stopPoints = []
   stopPoints = dismantleStopPoint(finalPoints)
@@ -223,13 +227,19 @@ async function innerOptimize(gpsPoints) {
   let totalMileage = await calculateSpeedAndMileage(finalPoints)
   let avgSpeed = await calculateAvgSpeed(finalPoints)
 
-    // 停留点前后点位的轨迹补偿（需要使用API调用地图能力进行，会产生额外的费用）
+  // 第三阶段：----------------------------------------------轨迹补偿。
+  // 土豪玩家根据配置的高德key和谷歌key。对点距超过平均值50的点自动进行两轮车路径规划补点。
+  // 效果极佳。但是注意两个问题：1、是两轮车路径规划。请根据自己的场景决定要不要启用；2、数据失真。对数据真实性要求高的用户不要启用。
+
+  // 停留点前后点位的轨迹补偿（需要使用API调用地图能力进行，会产生额外的费用）
   if(config.smoothness && finalPoints.length>3){
     //如果平均速度高于15公里（缺省值）每小时，则不进行轨迹补偿过渡。过快的速度在进行轨迹补偿时会和实际轨迹相差巨大
     if(avgSpeed<config.smoothnessLimitAvgSpeed){
       finalPoints = await smoothness(finalPoints)
     }
   }
+  
+  // 第四阶段：----------------------------------------------使用IQR算法剔除点距异常大的点（剔毛刺）
 
   //找到里程异常大的点。剔除它。
   //核心的作用是剔除轨迹中的极端偏移毛刺。
@@ -252,8 +262,11 @@ async function innerOptimize(gpsPoints) {
   //因为剔除了异常点所以要再次计算速度和里程。
   totalMileage = await calculateSpeedAndMileage(finalPoints)
 
-  //再次找到里程异常大的点。对完整的finalPoints轨迹进行切割
+  // 第五阶段：----------------------------------------------使用IQR算法再次寻找里程极大点。并从异常点处进行切割
   //某些偏移是行经中某一段信号丢失（隧道没信号、设备重启等）导致的点跨越极大的距离导致。这时删除不能解决问题。而是拆分轨迹。进行分别渲染或者虚化渲染
+  // 核心的作用是把轨迹中的异常点（信号丢失导致的点跨越极大的距离）从异常点处进行切割。
+  // 这样做的好处是：1、可以把异常点处的轨迹片段单独渲染。2、可以把异常点处的轨迹片段虚化渲染。3、可以把异常点处的轨迹片段单独渲染。
+
   let mileageOutliersCut = detectMileageOutliers(finalPoints,config.IQRThreshold)
   //根据mileageOutliersCut异常点下标把finalPoints切割成一个包含多个轨迹段的二维数组。
   let finalPointsSegments= []
@@ -272,6 +285,9 @@ async function innerOptimize(gpsPoints) {
     finalPointsSegments.push(finalPoints)
     trajectoryPointsSegments.push(trajectoryPoints)
   }
+
+  // 第六阶段（最后）：----------------------------------------------轨迹拼接
+  // 核心作用：1、得到处理后没有异常点的完整轨迹；2、异常轨迹段落前后的虚拟化处理；3、重新计算更加准确的平均速度和总里程。
 
   //基于finalPointsSegments和trajectoryPointsSegments把轨迹再次拼接起来刷新finalPoints完整轨迹
   //目的是通过IQR去除异常点后，需要对完整轨迹进行刷新保证后面计算的平均速度和总里程更加准确
