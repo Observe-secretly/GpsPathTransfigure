@@ -461,56 +461,6 @@ function percentile(sortedNums, p) {
 }
 
 /**
- * 计算两个GPS点之间的方向角（以正北为0度，顺时针方向）
- * @param {Object} point1 起始点 {lat, lng}
- * @param {Object} point2 目标点 {lat, lng}
- * @returns {Number} 方向角（度），范围0-360
- */
-function calculateBearing(point1, point2) {
-  const lat1 = degreesToRadians(point1.lat);
-  const lat2 = degreesToRadians(point2.lat);
-  const deltaLng = degreesToRadians(point2.lng - point1.lng);
-  
-  const y = Math.sin(deltaLng) * Math.cos(lat2);
-  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLng);
-  
-  let bearing = Math.atan2(y, x);
-  bearing = radiansToDegrees(bearing);
-  
-  // 转换为0-360度范围
-  return (bearing + 360) % 360;
-}
-
-/**
- * 根据起始点、方向角和距离计算目标点坐标
- * @param {Object} startPoint 起始点 {lat, lng}
- * @param {Number} bearing 方向角（度）
- * @param {Number} distance 距离（米）
- * @returns {Object} 目标点坐标 {lat, lng}
- */
-function calculateDestinationPoint(startPoint, bearing, distance) {
-  const R = 6371e3; // 地球半径（米）
-  const lat1 = degreesToRadians(startPoint.lat);
-  const lng1 = degreesToRadians(startPoint.lng);
-  const bearingRad = degreesToRadians(bearing);
-  
-  const lat2 = Math.asin(
-    Math.sin(lat1) * Math.cos(distance / R) +
-    Math.cos(lat1) * Math.sin(distance / R) * Math.cos(bearingRad)
-  );
-  
-  const lng2 = lng1 + Math.atan2(
-    Math.sin(bearingRad) * Math.sin(distance / R) * Math.cos(lat1),
-    Math.cos(distance / R) - Math.sin(lat1) * Math.sin(lat2)
-  );
-  
-  return {
-    lat: radiansToDegrees(lat2),
-    lng: radiansToDegrees(lng2)
-  };
-}
-
-/**
  * 计算停留点之间距离最近的另一个停留点距离小于distanceThreshold的占比
  * @param {Array} stopPoints - 包含停留点坐标的数组，每个坐标是一个对象，具有lat和lng属性
  * @returns {Boolean} - 若占比超过一定值则返回true，否则返回false
