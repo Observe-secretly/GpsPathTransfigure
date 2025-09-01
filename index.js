@@ -286,6 +286,9 @@ async function innerOptimize(gpsPoints) {
     totalMileage = await calculateMultipleTrajectoryMileage(finalPointsSegments)
   }
 
+  //此时轨迹处理结束。由于降噪的原因，需要重新获取还存在的停留点。
+  stopPoints = dismantleStopPoint(finalPoints)
+
   // 返回处理后的轨迹点数组
   return {
     "finalPoints": finalPoints,//优化后的轨迹
@@ -1158,58 +1161,71 @@ function generateSegmentInfo(positions) {
   let speedCount = 0; // 用于记录速度值的数量
 
   positions.forEach((position, index) => {
-      // 判断是否是停留点
-      if (position.startPosition && position.endPosition) {
-          // 如果之前有运动点，先将运动段添加到结果中
-          if (movementStart) {
-              let duration = calculateMilliseconds(positions[index - 1].currentTime, movementStart.currentTime);
-              const avgSpeed = speedCount > 0 ? (totalSpeed / speedCount).toFixed(2) : 0; // 计算平均速度
-              
-              result.push({
-                  type: 'motion',
-                  startPosition: movementStart,
-                  endPosition: { lat: positions[index - 1].lat, lng: positions[index - 1].lng },
-                  duration: formatMilliseconds(duration), // 计算运动持续时间
-                  startTime: movementStart.currentTime,
-                  endTime: positions[index - 1].currentTime,
-                  distance: formatDistance(totalDistance), // 累加距离
-                  averageSpeed: `${avgSpeed} km/h` // 平均速度
-              });
-              
-              movementStart = null; // 重置运动开始点
-              totalDistance = 0; // 重置总距离
-              totalSpeed = 0; // 重置总速度
-              speedCount = 0; // 重置速度计数
-          }
+    // 判断是否是停留点
+    if (position.startPosition && position.endPosition) {
+      // 如果之前有运动点，先将运动段添加到结果中
+      if (movementStart) {
+        let duration = calculateMilliseconds(
+          positions[index - 1].currentTime,
+          movementStart.currentTime
+        );
+        const avgSpeed =
+          speedCount > 0 ? (totalSpeed / speedCount).toFixed(2) : 0; // 计算平均速度
 
-          // 处理停留点
-          result.push({
-              type: 'stopped',
-              startPosition: position.startPosition,
-              endPosition: position.endPosition,
-              duration: position.stopTimeSeconds,
-              startTime: position.startTime,
-              endTime: position.endTime,
-              distance: 0 // 停留时距离为 0
-          });
-      } else {
-          // 如果是运动点
-          if (!movementStart) {
-              movementStart = { lat: position.lat, lng: position.lng, currentTime: position.currentTime };
-          } else {
-              // 累加每个点之间的距离，并限制为2位小数
-              totalDistance += parseFloat(calculateDistance(
-                  { lat: positions[index - 1].lat, lng: positions[index - 1].lng },
-                  { lat: position.lat, lng: position.lng }
-              ));
-              
-              // 累加速度
-              if (position.speed) {
-                  totalSpeed += position.speed;
-                  speedCount++;
-              }
-          }
+        result.push({
+          type: "motion",
+          startPosition: movementStart,
+          endPosition: {
+            lat: positions[index - 1].lat,
+            lng: positions[index - 1].lng,
+          },
+          duration: formatMilliseconds(duration), // 计算运动持续时间
+          startTime: movementStart.currentTime,
+          endTime: positions[index - 1].currentTime,
+          distance: formatDistance(totalDistance), // 累加距离
+          averageSpeed: `${avgSpeed} km/h`, // 平均速度
+        });
+
+        movementStart = null; // 重置运动开始点
+        totalDistance = 0; // 重置总距离
+        totalSpeed = 0; // 重置总速度
+        speedCount = 0; // 重置速度计数
       }
+
+      // 处理停留点
+      result.push({
+        type: "stopped",
+        startPosition: position.startPosition,
+        endPosition: position.endPosition,
+        duration: position.stopTimeSeconds,
+        startTime: position.startTime,
+        endTime: position.endTime,
+        distance: 0, // 停留时距离为 0
+      });
+    } else {
+      // 如果是运动点
+      if (!movementStart) {
+        movementStart = {
+          lat: position.lat,
+          lng: position.lng,
+          currentTime: position.currentTime,
+        };
+      } else {
+        // 累加每个点之间的距离，并限制为2位小数
+        totalDistance += parseFloat(
+          calculateDistance(
+            { lat: positions[index - 1].lat, lng: positions[index - 1].lng },
+            { lat: position.lat, lng: position.lng }
+          )
+        );
+
+        // 累加速度
+        if (position.speed) {
+          totalSpeed += position.speed;
+          speedCount++;
+        }
+      }
+    }
   });
 
   // 处理最后一段运动，如果最后一个点是运动点
@@ -1229,6 +1245,33 @@ function generateSegmentInfo(positions) {
           averageSpeed: `${avgSpeed} km/h` // 平均速度
       });
   }
+
+  //由于降噪的原因，会导致停留点的开始时间和结束时间与实际不符。
+  //需要重新获取停留点的开始时间和结束时间和持续时间
+  //计算逻辑是：识别出当前点若是停留点，那么它的开始时间就是上一个点的结束时间，结束时间就是下一个点的开始时间。
+  // 如果第一个点就是停留点只用和下个点的开始时间对齐。最后一个点则开始时间和上一个点的结束时间对齐
+  result.forEach((item, index) => {
+    if (item.type === 'stopped') {
+      // 处理startTime和startPosition
+      if (index != 0) {
+        // 非第一个点，使用上一个点的结束时间
+        item.startTime = result[index - 1].endTime;
+        // 处理startPosition
+        item.startPosition = result[index - 1].endPosition;
+      }
+      
+      // 处理endTime
+      if (index != result.length - 1) {
+        // 非最后一个点，使用下一个点的开始时间
+        item.endTime = result[index + 1].startTime;
+        // 处理endPosition
+        item.endPosition = result[index + 1].startPosition;
+      }
+      
+      // 重新计算停留时间（秒）
+      item.stopTimeSeconds = formatMilliseconds(calculateMilliseconds(item.startTime, item.endTime));
+    }
+  });
 
   if (config.openDebug) {
       console.log(result);
