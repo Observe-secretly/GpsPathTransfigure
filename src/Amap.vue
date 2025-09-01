@@ -252,7 +252,7 @@
               strokeWeight: 3,
               strokeStyle: 'dashed',
               strokeDasharray: [1, 2],
-              borderWidth:1,
+              borderWidth:2,
               zIndex: 50
             });
 
@@ -281,6 +281,8 @@
                 path: segmentPath,
                 strokeColor: segmentColor,
                 strokeWeight: 3,
+                isOutline:true,
+                outlineColor:'#959595',
                 lineJoin: 'round',
                 lineCap: 'round',
                 zIndex: 50

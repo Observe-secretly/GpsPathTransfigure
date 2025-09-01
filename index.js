@@ -332,7 +332,6 @@ function mergeTrajectorySegments(finalPointsSegments, trajectoryPointsSegments) 
             lat: currentPathSegmentPath[0].lat
           }
         ];
-        // 注意：这里原代码有bug，应该是push而不是concat
         finalPoints = finalPoints.concat(driftPath);
       }
       finalPoints = finalPoints.concat(currentPathSegmentPath);
@@ -343,7 +342,7 @@ function mergeTrajectorySegments(finalPointsSegments, trajectoryPointsSegments) 
       let afterPathSegment = trajectoryPointsSegments[i-1];
       let currentPathSegment = trajectoryPointsSegments[i];
       
-      if (i > 0 && i < trajectoryPointsSegments.length - 1) {
+      if (i > 0 && i < trajectoryPointsSegments.length) {
         let afterPath = afterPathSegment[afterPathSegment.length-1].path;
         let currentPath = currentPathSegment[0].path;
         
