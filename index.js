@@ -255,12 +255,16 @@ async function innerOptimize(gpsPoints) {
     finalPoints = removeIndices(finalPoints,mileageOutliers)
   }
 
+  //因为剔除了异常点所以要再次计算速度和里程。这个计算同时会计算点和点之间的速度与里程。不可以省略
+  totalMileage = await calculateSpeedAndMileage(finalPoints)
+  
   // 初始化轨迹渲染点数组
   let trajectoryPoints = []
   // 对轨迹进行颜色渲染。根据轨迹的速度不同，自适应颜色进行渲染
   if(config.pathColorOptimize && finalPoints.length>0){
     trajectoryPoints = await processTrajectory(finalPoints)
   }
+
 
   // 第五阶段：----------------------------------------------使用IQR算法再次寻找里程极大点。并从异常点处进行切割
   //某些偏移是行经中某一段信号丢失（隧道没信号、设备重启等）导致的点跨越极大的距离导致。这时删除不能解决问题。而是拆分轨迹。进行分别渲染或者虚化渲染
@@ -306,6 +310,8 @@ async function innerOptimize(gpsPoints) {
   //此时轨迹处理结束。由于降噪的原因，需要重新获取还存在的停留点。
   stopPoints = dismantleStopPoint(finalPoints)
 
+  
+
   // 返回处理后的轨迹点数组
   return {
     "finalPoints": finalPoints,//优化后的轨迹
@@ -342,15 +348,17 @@ function mergeTrajectorySegments(finalPointsSegments, trajectoryPointsSegments) 
       let currentPathSegmentPath = finalPointsSegments[i];
       
       if (i > 0 && i < finalPointsSegments.length - 1) {
-        // 构造虚线连接相邻段
+        // 构造虚线连接相邻段。要保证currentTime有值。否则卡片信息可能会出现无法计算运动和停留时长的问题
         let driftPath = [
           {
             lng: afterPathSegmentPath[afterPathSegmentPath.length-1].lng,
-            lat: afterPathSegmentPath[afterPathSegmentPath.length-1].lat
+            lat: afterPathSegmentPath[afterPathSegmentPath.length-1].lat,
+            currentTime:afterPathSegmentPath[afterPathSegmentPath.length-1].currentTime
           },
           {
             lng: currentPathSegmentPath[0].lng,
-            lat: currentPathSegmentPath[0].lat
+            lat: currentPathSegmentPath[0].lat,
+            currentTime:currentPathSegmentPath[0].currentTime
           }
         ];
         finalPoints = finalPoints.concat(driftPath);
@@ -364,8 +372,11 @@ function mergeTrajectorySegments(finalPointsSegments, trajectoryPointsSegments) 
       let currentPathSegment = trajectoryPointsSegments[i];
       
       if (i > 0 && i < trajectoryPointsSegments.length) {
-        let afterPath = afterPathSegment[afterPathSegment.length-1].path;
-        let currentPath = currentPathSegment[0].path;
+        let afterPoints = afterPathSegment[afterPathSegment.length-1];
+        let currenPoints = currentPathSegment[0];
+
+        let afterPath = afterPoints.path;
+        let currentPath = currenPoints.path;
         
         // 构造虚线连接相邻段
         let driftPath = [
@@ -381,7 +392,8 @@ function mergeTrajectorySegments(finalPointsSegments, trajectoryPointsSegments) 
         
         let driftPathSegment = {
           path: driftPath,
-          type: 'drift'
+          type: 'drift',
+          currentTime:afterPath[afterPath.length-1].currentTime
         };
         
         trajectoryPoints.push(driftPathSegment);
@@ -1319,9 +1331,6 @@ async function calculateSpeed(point1, point2) {
  * @returns {Number} 总里程（米）
  */
 async function calculateSpeedAndMileage(points) {
-  // 记录开始时间
-  const startTime = Date.now()
-  
   let totalMileage = 0
   for (let i = 0; i < points.length-1; i++) {
     //速度
@@ -1336,11 +1345,6 @@ async function calculateSpeedAndMileage(points) {
     points[i].mileage=mileage;
     totalMileage+=parseFloat(mileage)
   }
-
-  // 计算耗时并输出日志
-  const endTime = Date.now()
-  const timeSpent = endTime - startTime
-  console.log(`计算速度和里程完成,共耗时${timeSpent}毫秒`)
   return totalMileage
 }
 
