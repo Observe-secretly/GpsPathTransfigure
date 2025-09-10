@@ -225,6 +225,9 @@ async function innerOptimize(gpsPoints) {
 
   //计算速度和里程
   let totalMileage = await calculateSpeedAndMileage(finalPoints)
+  //给轨迹里程赋初值
+  let trajectoryMileage = totalMileage 
+
   let avgSpeed = await calculateAvgSpeed(finalPoints)
 
   // 第三阶段：----------------------------------------------轨迹补偿。
@@ -258,9 +261,6 @@ async function innerOptimize(gpsPoints) {
   if(config.pathColorOptimize && finalPoints.length>0){
     trajectoryPoints = await processTrajectory(finalPoints)
   }
-
-  //因为剔除了异常点所以要再次计算速度和里程。
-  totalMileage = await calculateSpeedAndMileage(finalPoints)
 
   // 第五阶段：----------------------------------------------使用IQR算法再次寻找里程极大点。并从异常点处进行切割
   //某些偏移是行经中某一段信号丢失（隧道没信号、设备重启等）导致的点跨越极大的距离导致。这时删除不能解决问题。而是拆分轨迹。进行分别渲染或者虚化渲染
@@ -299,7 +299,8 @@ async function innerOptimize(gpsPoints) {
   // 这样做会让平均速度和总里程更加精准。因为分段轨迹已经去掉了异常点和中途信号丢失的轨迹片段
   if(finalPointsSegments.length>1){
     avgSpeed = await calculateMultipleTrajectoryAvgSpeed(finalPointsSegments)
-    totalMileage = await calculateMultipleTrajectoryMileage(finalPointsSegments)
+    trajectoryMileage = await calculateMultipleTrajectoryMileage(finalPointsSegments)
+    totalMileage = await calculateSpeedAndMileage(finalPoints)
   }
 
   //此时轨迹处理结束。由于降噪的原因，需要重新获取还存在的停留点。
@@ -319,7 +320,8 @@ async function innerOptimize(gpsPoints) {
     "endPoint":finalPoints[finalPoints.length-1],//结束点
     "samplePoints":samplePoints(finalPoints),//轨迹抽样数据（固定数量）
     "avgSpeed":avgSpeed,
-    "totalMileage":totalMileage
+    "totalMileage":totalMileage,
+    "trajectoryMileage":trajectoryMileage
   }; 
 }
 

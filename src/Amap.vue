@@ -16,6 +16,17 @@
         </div>
       </div>
     </div> 
+    
+    <div class="map-legend">
+      <div class="legend-item">
+        <div class="legend-label">平均速度</div>
+        <div class="legend-value">{{ avgSpeed }} km/h</div>
+      </div>
+      <div class="legend-item">
+        <div class="legend-label">总里程</div>
+        <div class="legend-value">{{ totalMileage }} km</div>
+      </div>
+    </div>
 
     <div class="progress">
       <ProgressChart :data="playPoints" :onMove="handleMove" :setPosition="playPosition" sliderImage="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAAAXNSR0IArs4c6QAAASBJREFUaEPtltENgkAQRO/q0H6oRNsQ29BK6EfrwGBi4gey9zIsCXH85bG3s7NyU8vOf3Xn/RcLOJ6HfhzLZXKy1nJ93Lp+yVXKRxsiOfDdzOegJRGUj5p/D60F+sUcTsM49+x572brUr6lt/8WQFeC8ukOTAfQPyXlIxHSCkXFt3huAVtMeekMO2AHxAnIK0Q/i5SP9EkC6MVE+ah5ZyEaziif7gBdCcqnC3AWahlxwEhfoRXOl0tYgDxCsYAdEAcovy47QLMN5SOFkgB6MVE+at5ZiGYbyqc7QFeC8ukCnIVaRuwstMKUMktI90BmY621LaB1Ulmc7ADNNpSPhEsC6MVE+ah5ZyGabSif7gBdCcqnC3AWahmxs9AKU8os8QK/SiBAyMIBIAAAAABJRU5ErkJggg==" />
@@ -44,6 +55,9 @@
   let isPlaying = ref(false);
   // 运动速度
   let speed = ref(-1);
+  // 平均速度和总里程
+  let avgSpeed = ref(0);
+  let totalMileage = ref(0);
   //用于可播放的轨迹点
   let playPoints = []
   //播放位置
@@ -180,11 +194,13 @@
           samplePointsNum:300,
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
-        const { finalPoints,trajectoryPoints, stopPoints, center, zoom ,segmentInfo,startPoint,endPoint,avgSpeed,totalMileage} = staticPoints;
-        console.log("平均速度"+avgSpeed)
-        console.log("总里程"+totalMileage)
+        const { finalPoints,trajectoryPoints, stopPoints, center, zoom ,segmentInfo,startPoint,endPoint,avgSpeed: speed_avg,totalMileage: mileage_total} = staticPoints;
+        console.log("平均速度"+speed_avg)
+        console.log("总里程"+mileage_total)
         segmentInfoData.value = segmentInfo
         playPoints = finalPoints
+        avgSpeed.value = speed_avg
+        totalMileage.value = parseFloat(mileage_total/1000).toFixed(2)
 
         var map = new AMap.Map('amapContainer', {
             resizeEnable: true,
@@ -324,3 +340,36 @@
  
   
 </script>
+
+<style scoped>
+.map-legend {
+  position: absolute;
+  bottom: 100px;
+  right: 32px;
+  background-color: rgba(255, 255, 255, 0.8);
+  border-radius: 4px;
+  padding: 10px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+}
+
+.legend-item {
+  margin-bottom: 5px;
+}
+
+.legend-item:last-child {
+  margin-bottom: 0;
+}
+
+.legend-label {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 2px;
+}
+
+.legend-value {
+  font-size: 14px;
+  font-weight: bold;
+  color: #333;
+}
+</style>

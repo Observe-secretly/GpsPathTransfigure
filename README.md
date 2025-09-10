@@ -183,10 +183,11 @@ import ProgressChart from 'gpspathtransfigure/src/component/ProgressChart.vue';
 |endPoint|轨迹的结束点，即finalPoints的最后一个点|
 |samplePoints|轨迹抽样数据（固定数量），用于轨迹概览|
 |avgSpeed|平均速度(去掉最小值和最大值)，单位为km/h|
-|totalMileage|总里程，单位为m|
+|totalMileage|总里程：包含虚线轨迹（异常轨迹段的补点）。单位为m|
+|trajectoryMileage|轨迹里程：真实设备上报的gps点轨迹。不包含虚线轨迹。单位为m|
 
 
 
 
-# 问题交流反馈或issues
- QQ：914245697
+# 问题反馈或
+ Github提交issues
