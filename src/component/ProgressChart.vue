@@ -2,7 +2,11 @@
     <div class="chart-container" ref="chartContainer">
       <canvas id="speed-chart"></canvas>
       <div id="slider" class="slider">
-        <div v-if="dynamicMileage!=0" class="bubble">{{dynamicMileage}}</div>
+        <div v-if="dynamicMileage!=0" class="bubble">
+          <div class="bubble-item"><span class="bubble-label">{{locale=='zh'?'里程:':'Mileage:'}}</span> {{dynamicMileage}} km</div>
+          <div class="bubble-item"><span class="bubble-label">{{locale=='zh'?'速度:':'Speed:'}}</span> {{currentPoint.speed !== undefined ? currentPoint.speed.toFixed(2) : '--'}} km/h</div>
+          <div class="bubble-item"><span class="bubble-label">{{locale=='zh'?'时间:':'Time:'}}</span> {{currentPoint.currentTime || '--'}}</div>
+        </div>
         <img :src="sliderImage" alt="Slider Handle" />
       </div>
     </div>
@@ -10,10 +14,14 @@
   
   <script setup>
   import { ref, watch, onMounted, onUnmounted } from 'vue';
-  import  moment from "moment"
   
   // 接收数据
   const props = defineProps({
+        locale: {
+          type: String,
+          required: false,
+          default: 'zh'
+        },
         data: {
             type: Array,
             required: true,
@@ -36,7 +44,6 @@
     watch(() => props.setPosition, (newIndex) => {
         if (newIndex !== undefined) {
             setSliderPositionByIndex(newIndex);
-            console.log(newIndex)
             //计算里程气泡信息用于显示
             calculateTotalMileage(newIndex)
         }
@@ -50,6 +57,7 @@
   const canvas = ref(null);
   const ctx = ref(null);
   const dynamicMileage=ref(0);
+  const currentPoint=ref({});
   
   // 设置画布尺寸和绘制图表
   const updateCanvasSizeAndRender = () => {
@@ -117,24 +125,6 @@
     const containerWidth = chartContainer.value.offsetWidth;
     return props.data.map((_, index) => (containerWidth / (props.data.length - 1)) * index);
   };
-
-  /**
-     * 计算两个时间之间的毫秒值
-     * @param {*} time1 
-     * @param {*} time2 
-     * @returns 
-     */
-    function calculateMilliseconds(time1, time2) {
-    let timeformat='yyyy-MM-dd HH:mm:ss'
-    // 使用全局变量 timeformat 解析时间字符串
-    let date1 = moment(time1, timeformat);
-    let date2 = moment(time2, timeformat);
-
-    // 计算两个日期之间的毫秒值差异
-    let milliseconds = Math.abs(date2 - date1);
-
-    return milliseconds;
-    }
   
   // 绘制停留点
   const drawStopLines = () => {
@@ -233,6 +223,9 @@
             //计算已行进的里程
             calculateTotalMileage(closestIndex)
 
+            //缓存当前点的信息
+            currentPoint.value=props.data[closestIndex]
+
             // 调用回调函数并传递当前下标
             callback(closestIndex);
         }
@@ -243,6 +236,9 @@
         const dataPoints = calculateDataPoints();
         if (index >= 0 && index < dataPoints.length) {
             updateSliderPosition(dataPoints[index]);
+
+            //缓存当前点的信息
+            currentPoint.value=props.data[index]
         }
     };
     
@@ -250,6 +246,7 @@
     function calculateTotalMileage(index) {
         if(index==0){
             dynamicMileage.value=0
+            currentPoint.value=props.data[0] || {}
             return ;
         }
         let data = props.data
@@ -356,24 +353,42 @@
         bottom: 100%; /* 位于滑块上方 */
         left: 50%;
         transform: translateX(-50%);
-        background-color: rgba(0, 0, 0, 0.75);
+        background-color: rgba(0, 0, 0, 0.85);
         color: white;
-        padding: 5px;
-        border-radius: 4px;
+        padding: 8px 10px;
+        border-radius: 6px;
         font-size: 12px;
         white-space: nowrap;
         margin-bottom: 10px; /* 与滑块的间距 */
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        min-width: 150px;
     }
 
     .bubble::after {
         content: "";
         position: absolute;
-        bottom: -10px; /* 调整小三角的位置 */
+        bottom: -8px; /* 调整小三角的位置 */
         left: 50%;
         transform: translateX(-50%);
-        border-width: 5px;
+        border-width: 4px;
         border-style: solid;
-        border-color: #000000 transparent transparent transparent;
+        border-color: rgba(0, 0, 0, 0.85) transparent transparent transparent;
+    }
+    
+    .bubble-item {
+        margin-bottom: 4px;
+        display: flex;
+        justify-content: space-between;
+    }
+    
+    .bubble-item:last-child {
+        margin-bottom: 0;
+    }
+    
+    .bubble-label {
+        color: #a8a8a8;
+        margin-right: 5px;
+        font-weight: 500;
     }
   
   .stop-line {
