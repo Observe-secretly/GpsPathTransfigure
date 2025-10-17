@@ -13,6 +13,9 @@ var config={
     autoOptimize : true, // 是否开启参数自动优化
     autoOptimizeMaxCount : 10,//自动优化调整次数
     IQRThreshold:1.5,// 异常值检测阈值。此值通常要大于等于1.5
+    speedIQRThreshold:0.75,// 速度异常值检测阈值
+
+    limitMaxSpeed:80,// 最大速度。单位：千米/小时。两点之间的速度超过此值的gps点不参与计算平均速度
 
     proximityStopThreshold:45,// 近距离停留点距离阈值。此值通常要大于等于distanceThreshold
     proximityStopTimeInterval:60,//近距离停留点时间间隔阈值。单位分钟
@@ -66,7 +69,7 @@ function calculateDistance(point1, point2) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); // Haversine公式的另一个中间变量
 
 
-  return (R * c).toFixed(2); // 计算最终距离，单位为米，并保留两位小数
+  return Number((R * c).toFixed(2)); // 计算最终距离，单位为米，并保留两位小数
 }
 
 //格式化距离
@@ -1334,18 +1337,24 @@ async function calculateSpeedAndMileage(points) {
   let totalMileage = 0
   for (let i = 0; i < points.length-1; i++) {
     //速度
-    if(points[i].type=='add'&&points[i+1].type=='add'){//如果两个点都是添加进去的点，那就不计算速度
+    if(points[i].type=='add' || points[i+1].type=='add'){//如果两个点都是添加进去的点，那就不计算速度
       points[i].speed=0;
     }else{
       let speed = await calculateSpeed(points[i], points[i + 1])
       points[i].speed=speed;
+      if(speed<config.limitMaxSpeed){
+        points[i].speed=speed;
+      }else{
+        points[i].speed=0;
+      }
+      
     }
     //里程
     let mileage = calculateDistance(points[i], points[i + 1])
     points[i].mileage=mileage;
     totalMileage+=parseFloat(mileage)
   }
-  return totalMileage
+  return Number((totalMileage).toFixed(2));
 }
 
 /**
@@ -1436,8 +1445,17 @@ async function calculateMultipleTrajectoryAvgSpeed(trajectories) {
   )
   
   // 计算所有轨迹平均速度的平均值
-  const validSpeeds = avgSpeedResults.filter(speed => speed > 0);
-  const avgSpeed = validSpeeds.length > 0 
+  let validSpeeds = avgSpeedResults.filter(speed => speed > 0 && speed < config.limitMaxSpeed)
+  if(config.openDebug){
+    console.debug("固定阈值过滤后的有效速度数组:"+validSpeeds)
+  }
+  
+  validSpeeds = speedFilterIQR(validSpeeds);
+  if(config.openDebug){
+    console.debug("IQR过滤后的有效速度数组:"+validSpeeds)
+  }
+
+  const avgSpeed = validSpeeds.length > 0
     ? validSpeeds.reduce((sum, speed) => sum + speed, 0) / validSpeeds.length 
     : 0;
   
@@ -1452,6 +1470,20 @@ async function calculateMultipleTrajectoryAvgSpeed(trajectories) {
   return avgSpeed.toFixed(2);
 }
 
+/**
+ * 计算速度的四分位数范围（IQR），并过滤出在这个范围内的速度值。
+ * @param {Array} Speeds 速度数组（单位：公里/小时）
+ * @returns {Array} 过滤后的速度数组，只包含在IQR范围内的速度值
+ */
+function speedFilterIQR(Speeds) {
+  const sorted = [...Speeds].sort((a, b) => a - b);
+  const q1 = sorted[Math.floor(sorted.length * 0.25)];
+  const q3 = sorted[Math.floor(sorted.length * 0.75)];
+  const iqr = q3 - q1;
+  const lower = q1 - config.speedIQRThreshold * iqr;
+  const upper = q3 + config.speedIQRThreshold * iqr;
+  return Speeds.filter(x => x >= lower && x <= upper);
+}
 
 /**
  * 计算速度区间
