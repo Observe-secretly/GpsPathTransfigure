@@ -10,12 +10,16 @@ var config={
     distanceThresholdPercentage : 70, // 距离阈值内的点的百分比
     distanceThreshold : 35, // 距离阈值，单位为米
     stationaryEndPoints : 10, // 判断静止状态结束的连续点数
-    autoOptimize : true, // 是否开启参数自动优化
+    limitStopPointTime : 10,//停留点时间阈值。单位分钟。如果被识别是停留点，但是时间小于此值，则会被认为是运动点。若未识别为停留点，时间超过此值，则会被认为是停留点。
+     abnormalPointRatio:0.05,//异常点占比阈值。若异常点占比超过此值，则会被认为是异常点识别功能失效或不适合此轨迹
+    
+    autoOptimize : false, // 是否开启参数自动优化
     autoOptimizeMaxCount : 10,//自动优化调整次数
-    IQRThreshold:1.5,// 异常值检测阈值。此值通常要大于等于1.5
+    
+    IQRThreshold:2.5,// 异常值检测阈值。此值通常要大于等于1.5
     speedIQRThreshold:0.75,// 速度异常值检测阈值
 
-    limitMaxSpeed:80,// 最大速度。单位：千米/小时。两点之间的速度超过此值的gps点不参与计算平均速度
+    limitSpeed:80,// 最大速度。单位：千米/小时。两点之间的速度超过此值的gps点不参与计算平均速度
 
     proximityStopThreshold:45,// 近距离停留点距离阈值。此值通常要大于等于distanceThreshold
     proximityStopTimeInterval:60,//近距离停留点时间间隔阈值。单位分钟
@@ -250,6 +254,17 @@ async function innerOptimize(gpsPoints) {
   //找到里程异常大的点。剔除它。
   //核心的作用是剔除轨迹中的极端偏移毛刺。
   let mileageOutliers = detectMileageOutliers(finalPoints,config.IQRThreshold)
+  let abnormalIdentification = false //异常识别是否失效
+  //若异常点占比过多。则判定异常点识别功能失效或不适合此轨迹
+  //统计异常点mileageOutliers占比是否超过一定比例。超过则判定异常点识别功能失效或不适合此轨迹。第五步将不会再进行处理。
+  //第四步是剔除毛刺，删除点并不会改变轨迹的大致形状。故不用取消此步骤
+  if(mileageOutliers.length>0 && mileageOutliers.length/finalPoints.length>config. abnormalPointRatio){
+    if(config.openDebug){
+      console.log(`异常点占比${mileageOutliers.length/finalPoints.length}超过${config. abnormalPointRatio}。异常点识别功能失效或不适合此轨迹`)
+    }
+    abnormalIdentification = true
+  }
+
   // 过滤掉里程小于distanceThreshold*2的异常点下标
   mileageOutliers = mileageOutliers.filter(index => {
     return finalPoints[index].mileage > config.distanceThreshold * 2
@@ -268,47 +283,49 @@ async function innerOptimize(gpsPoints) {
     trajectoryPoints = await processTrajectory(finalPoints)
   }
 
+  if(!abnormalIdentification){
+    // 第五阶段：----------------------------------------------使用IQR算法再次寻找里程极大点。并从异常点处进行切割
+    //某些偏移是行经中某一段信号丢失（隧道没信号、设备重启等）导致的点跨越极大的距离导致。这时删除不能解决问题。而是拆分轨迹。进行分别渲染或者虚化渲染
+    // 核心的作用是把轨迹中的异常点（信号丢失导致的点跨越极大的距离）从异常点处进行切割。
+    // 这样做的好处是：1、可以把异常点处的轨迹片段单独渲染。2、可以把异常点处的轨迹片段虚化渲染。3、可以把异常点处的轨迹片段单独渲染。
 
-  // 第五阶段：----------------------------------------------使用IQR算法再次寻找里程极大点。并从异常点处进行切割
-  //某些偏移是行经中某一段信号丢失（隧道没信号、设备重启等）导致的点跨越极大的距离导致。这时删除不能解决问题。而是拆分轨迹。进行分别渲染或者虚化渲染
-  // 核心的作用是把轨迹中的异常点（信号丢失导致的点跨越极大的距离）从异常点处进行切割。
-  // 这样做的好处是：1、可以把异常点处的轨迹片段单独渲染。2、可以把异常点处的轨迹片段虚化渲染。3、可以把异常点处的轨迹片段单独渲染。
+    let mileageOutliersCut = detectMileageOutliers(finalPoints,config.IQRThreshold)
+    //根据mileageOutliersCut异常点下标把finalPoints切割成一个包含多个轨迹段的二维数组。
+    let finalPointsSegments= []
+    let trajectoryPointsSegments=[]
+    if(mileageOutliersCut.length>0 ){//存在异常点
+      finalPointsSegments = splitTrajectoryByOutliers(finalPoints, mileageOutliersCut);
+      //分别计算每个轨迹的颜色渲染轨迹
+      for (let i = 0; i < finalPointsSegments.length; i++) {
+        let trajectoryPointsSegment = await processTrajectory(finalPointsSegments[i])
+        trajectoryPointsSegments.push(trajectoryPointsSegment)
+      }
+    }
 
-  let mileageOutliersCut = detectMileageOutliers(finalPoints,config.IQRThreshold)
-  //根据mileageOutliersCut异常点下标把finalPoints切割成一个包含多个轨迹段的二维数组。
-  let finalPointsSegments= []
-  let trajectoryPointsSegments=[]
-  if(mileageOutliersCut.length>0){//存在异常点
-    finalPointsSegments = splitTrajectoryByOutliers(finalPoints, mileageOutliersCut);
-    //分别计算每个轨迹的颜色渲染轨迹
-    for (let i = 0; i < finalPointsSegments.length; i++) {
-      let trajectoryPointsSegment = await processTrajectory(finalPointsSegments[i])
-      trajectoryPointsSegments.push(trajectoryPointsSegment)
+    //如果不存在异常点，就把finalPoints作为一个轨迹段
+    if(finalPointsSegments.length==0){//若不存在异常点，就把finalPoints作为一个轨迹段
+      finalPointsSegments.push(finalPoints)
+      trajectoryPointsSegments.push(trajectoryPoints)
+    }
+
+    // 第六阶段（最后）：----------------------------------------------轨迹拼接
+    // 核心作用：1、得到处理后没有异常点的完整轨迹；2、异常轨迹段落前后的虚拟化处理；3、重新计算更加准确的平均速度和总里程。
+
+    //基于finalPointsSegments和trajectoryPointsSegments把轨迹再次拼接起来刷新finalPoints完整轨迹
+    //目的是通过IQR去除异常点后，需要对完整轨迹进行刷新保证后面计算的平均速度和总里程更加准确
+    const mergedTrajectories = mergeTrajectorySegments(finalPointsSegments, trajectoryPointsSegments);
+    finalPoints = mergedTrajectories.finalPoints;
+    trajectoryPoints = mergedTrajectories.trajectoryPoints;
+
+    // 重新计算平均速度和总里程。通过分段计算每个轨迹的平均速度和总里程，最后再进行累加
+    // 这样做会让平均速度和总里程更加精准。因为分段轨迹已经去掉了异常点和中途信号丢失的轨迹片段
+    if(finalPointsSegments.length>1){
+      avgSpeed = await calculateMultipleTrajectoryAvgSpeed(finalPointsSegments)
+      trajectoryMileage = await calculateMultipleTrajectoryMileage(finalPointsSegments)
+      totalMileage = await calculateSpeedAndMileage(finalPoints)
     }
   }
-
-  //如果不存在异常点，就把finalPoints作为一个轨迹段
-  if(finalPointsSegments.length==0){//若不存在异常点，就把finalPoints作为一个轨迹段
-    finalPointsSegments.push(finalPoints)
-    trajectoryPointsSegments.push(trajectoryPoints)
-  }
-
-  // 第六阶段（最后）：----------------------------------------------轨迹拼接
-  // 核心作用：1、得到处理后没有异常点的完整轨迹；2、异常轨迹段落前后的虚拟化处理；3、重新计算更加准确的平均速度和总里程。
-
-  //基于finalPointsSegments和trajectoryPointsSegments把轨迹再次拼接起来刷新finalPoints完整轨迹
-  //目的是通过IQR去除异常点后，需要对完整轨迹进行刷新保证后面计算的平均速度和总里程更加准确
-  const mergedTrajectories = mergeTrajectorySegments(finalPointsSegments, trajectoryPointsSegments);
-  finalPoints = mergedTrajectories.finalPoints;
-  trajectoryPoints = mergedTrajectories.trajectoryPoints;
-
-  // 重新计算平均速度和总里程。通过分段计算每个轨迹的平均速度和总里程，最后再进行累加
-  // 这样做会让平均速度和总里程更加精准。因为分段轨迹已经去掉了异常点和中途信号丢失的轨迹片段
-  if(finalPointsSegments.length>1){
-    avgSpeed = await calculateMultipleTrajectoryAvgSpeed(finalPointsSegments)
-    trajectoryMileage = await calculateMultipleTrajectoryMileage(finalPointsSegments)
-    totalMileage = await calculateSpeedAndMileage(finalPoints)
-  }
+  
 
   //此时轨迹处理结束。由于降噪的原因，需要重新获取还存在的停留点。
   stopPoints = dismantleStopPoint(finalPoints)
@@ -319,8 +336,6 @@ async function innerOptimize(gpsPoints) {
   return {
     "finalPoints": finalPoints,//优化后的轨迹
     "trajectoryPoints":trajectoryPoints,//优化后根据速度进行拆分的轨迹信息
-    "finalPointsSegments": finalPointsSegments,//优化后的轨迹。（根据异常点进行切割的多段轨迹）
-    "trajectoryPointsSegments":trajectoryPointsSegments,//优化后根据速度进行拆分的轨迹信息。（根据异常点进行切割的多段轨迹）
     "stopPoints" : stopPoints,//所有的停留点
     "center":calculateCentroid(finalPoints),//中心点
     'zoom':calculateZoom(calculateBoundingBox(finalPoints), config.mapWidth, config.mapHeight),//缩放比
@@ -1189,15 +1204,16 @@ function calculateZoom(boundingBox, mapWidth, mapHeight) {
 function generateSegmentInfo(positions) {
   const result = [];
   let movementStart = null; // 用于记录运动开始的点
+  let currentPath = []; // 用于记录当前运动段的路径
+
   let totalDistance = 0; // 用于累加运动段中的距离
   let totalSpeed = 0; // 用于累加运动段中的速度
   let speedCount = 0; // 用于记录速度值的数量
-
   positions.forEach((position, index) => {
     // 判断是否是停留点
     if (position.startPosition && position.endPosition) {
       // 如果之前有运动点，先将运动段添加到结果中
-      if (movementStart) {
+      if (movementStart != null) {
         let duration = calculateMilliseconds(
           positions[index - 1].currentTime,
           movementStart.currentTime
@@ -1207,6 +1223,7 @@ function generateSegmentInfo(positions) {
 
         result.push({
           type: "motion",
+          path: currentPath, // 添加当前路径
           startPosition: movementStart,
           endPosition: {
             lat: positions[index - 1].lat,
@@ -1220,6 +1237,8 @@ function generateSegmentInfo(positions) {
         });
 
         movementStart = null; // 重置运动开始点
+        currentPath = []; // 重置当前路径
+
         totalDistance = 0; // 重置总距离
         totalSpeed = 0; // 重置总速度
         speedCount = 0; // 重置速度计数
@@ -1243,6 +1262,7 @@ function generateSegmentInfo(positions) {
           lng: position.lng,
           currentTime: position.currentTime,
         };
+        currentPath.push(movementStart); // 添加当前点到路径中
       } else {
         // 累加每个点之间的距离，并限制为2位小数
         totalDistance += parseFloat(
@@ -1251,6 +1271,7 @@ function generateSegmentInfo(positions) {
             { lat: position.lat, lng: position.lng }
           )
         );
+        currentPath.push({ lat: position.lat, lng: position.lng ,currentTime: position.currentTime}); // 添加当前点到路径中
 
         // 累加速度
         if (position.speed) {
@@ -1337,15 +1358,18 @@ async function calculateSpeedAndMileage(points) {
   let totalMileage = 0
   for (let i = 0; i < points.length-1; i++) {
     //速度
-    if(points[i].type=='add' || points[i+1].type=='add'){//如果两个点都是添加进去的点，那就不计算速度
+    if(points[i].type=='add'||points[i].type=='drift' || points[i+1].type=='add'||points[i+1].type=='drift'){//如果两个点都是添加进去的点，那就不计算速度
       points[i].speed=0;
+      continue
     }else{
       let speed = await calculateSpeed(points[i], points[i + 1])
       points[i].speed=speed;
-      if(speed<config.limitMaxSpeed){
+      if(speed<config.limitSpeed){
         points[i].speed=speed;
       }else{
         points[i].speed=0;
+        //速度异常的话可能是漂移点，所以往后走计算总里程了
+        continue
       }
       
     }
@@ -1380,7 +1404,7 @@ async function calculateMultipleTrajectoryMileage(trajectories) {
   const endTime = Date.now()
   const timeSpent = endTime - startTime
   if(config.openDebug){
-    console.log(`并行计算${trajectories.length}条轨迹的速度和里程完成,总里程${totalMileage}米,共耗时${timeSpent}毫秒`)
+    console.debug(`并行计算${trajectories.length}条轨迹的速度和里程完成,总里程${totalMileage}米,共耗时${timeSpent}毫秒`)
   }
 
   return totalMileage.toFixed(2);
@@ -1399,6 +1423,14 @@ async function calculateAvgSpeed(points) {
       newPoints.push(item);
     }
   });
+  // console.log(newPoints.length)
+  // 剔除添加进去的点
+  // for (let index = 0; index < newPoints.length; index++) {
+  //   console.error(newPoints[index])
+  // }
+  // newPoints = newPoints.filter(item => item.type !== 'add');
+  // console.error(newPoints)
+  
   if (newPoints.length < 2) {
     return 0; // 如果有效的点少于2个，返回0
   }
@@ -1445,7 +1477,7 @@ async function calculateMultipleTrajectoryAvgSpeed(trajectories) {
   )
   
   // 计算所有轨迹平均速度的平均值
-  let validSpeeds = avgSpeedResults.filter(speed => speed > 0 && speed < config.limitMaxSpeed)
+  let validSpeeds = avgSpeedResults.filter(speed => speed > 0 && speed < config.limitSpeed)
   if(config.openDebug){
     console.debug("固定阈值过滤后的有效速度数组:"+validSpeeds)
   }
