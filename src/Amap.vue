@@ -19,8 +19,12 @@
     
     <div class="map-legend">
       <div class="legend-item">
-        <div class="legend-label">平均速度</div>
-        <div class="legend-value">{{ avgSpeed }} km/h</div>
+          <div class="legend-label">净平均速度</div>
+          <div class="legend-value">{{ avgSpeed }} km/h</div>
+      </div>
+      <div class="legend-item">
+          <div class="legend-label">运动平均速度</div>
+          <div class="legend-value">{{ moveAvgSpeed }} km/h</div>
       </div>
       <div class="legend-item">
         <div class="legend-label">总里程</div>
@@ -57,6 +61,7 @@
   let speed = ref(-1);
   // 平均速度和总里程
   let avgSpeed = ref(0);
+  let moveAvgSpeed = ref(0);
   let totalMileage = ref(0);
   //用于可播放的轨迹点
   let playPoints = []
@@ -196,10 +201,11 @@
           samplePointsNum:300,
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
-        const { finalPoints,trajectoryPoints, stopPoints, center, zoom ,segmentInfo,startPoint,endPoint,avgSpeed: speed_avg,totalMileage: mileage_total} = staticPoints;
+        const { finalPoints,trajectoryPoints, stopPoints, center, zoom ,segmentInfo,startPoint,endPoint,moveAvgSpeed:move_avg_speed,avgSpeed: speed_avg,totalMileage: mileage_total} = staticPoints;
         segmentInfoData.value = segmentInfo
         playPoints = finalPoints
         avgSpeed.value = speed_avg
+        moveAvgSpeed.value = move_avg_speed
         totalMileage.value = parseFloat(mileage_total/1000).toFixed(2)
 
         var map = new AMap.Map('amapContainer', {

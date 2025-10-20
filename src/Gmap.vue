@@ -19,9 +19,14 @@
 
         <div class="map-legend">
             <div class="legend-item">
-                <div class="legend-label">平均速度</div>
+                <div class="legend-label">净平均速度</div>
                 <div class="legend-value">{{ avgSpeed }} km/h</div>
             </div>
+            <div class="legend-item">
+                <div class="legend-label">运动平均速度</div>
+                <div class="legend-value">{{ moveAvgSpeed }} km/h</div>
+            </div>
+            
             <div class="legend-item">
                 <div class="legend-label">总里程</div>
                 <div class="legend-value">{{ totalMileage }} km</div>
@@ -47,6 +52,7 @@
     let speed = ref(-1);
     // 平均速度和总里程
     let avgSpeed = ref(0);
+    let moveAvgSpeed = ref(0);
     let totalMileage = ref(0);
     //用于可播放的轨迹点
     let playPoints = []
@@ -224,12 +230,13 @@
             locale:'en',
             gMapKey:apiKey,
             defaultMapService:'gmap',
-            openDebug:false,
+            openDebug:true,
             smoothness:false,
             pathColorOptimize:true,
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
-        const { finalPoints, stopPoints,trajectoryPoints,center, zoom ,segmentInfo,startPoint,endPoint,avgSpeed: speed_avg,totalMileage: mileage_total,samplePoints} = staticPoints;
+        const { finalPoints, stopPoints,trajectoryPoints,center, zoom ,segmentInfo,startPoint,endPoint,moveAvgSpeed:move_avg_speed,avgSpeed: speed_avg,totalMileage: mileage_total,samplePoints} = staticPoints;
+        moveAvgSpeed.value = move_avg_speed
         avgSpeed.value = speed_avg
         totalMileage.value = Number((mileage_total/1000).toFixed(2));
         segmentInfoData.value = segmentInfo

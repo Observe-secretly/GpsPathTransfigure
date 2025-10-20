@@ -261,7 +261,7 @@ async function innerOptimize(gpsPoints) {
   //给轨迹里程赋初值
   let trajectoryMileage = totalMileage 
 
-  let avgSpeed = await calculateAvgSpeed(totalMileage,
+  let avgSpeed = calculateAvgSpeed(totalMileage,
     calculateMilliseconds(finalPoints[0].currentTime,finalPoints[finalPoints.length-1].currentTime)/1000)
   
   // 第三阶段：----------------------------------------------轨迹补偿。
@@ -357,7 +357,20 @@ async function innerOptimize(gpsPoints) {
   //此时轨迹处理结束。由于降噪的原因，需要重新获取还存在的停留点。
   stopPoints = dismantleStopPoint(finalPoints)
 
-  
+  //轨迹分段信息
+  let segmentInfo = generateSegmentInfo(finalPoints)
+  let moveAvgSpeed = 0
+  if(segmentInfo){
+    let _totalMileage = 0
+    let _totalTime = 0
+    for(let item of segmentInfo){
+      if(item.type=='motion'){
+        _totalMileage += item.distanceLong
+        _totalTime += item.durationLong
+      }
+    }
+    moveAvgSpeed = calculateAvgSpeed(_totalMileage,_totalTime/1000)
+  }
 
   // 返回处理后的轨迹点数组
   return {
@@ -366,11 +379,12 @@ async function innerOptimize(gpsPoints) {
     "stopPoints" : stopPoints,//所有的停留点
     "center":calculateCentroid(finalPoints),//中心点
     'zoom':calculateZoom(calculateBoundingBox(finalPoints), config.mapWidth, config.mapHeight),//缩放比
-    "segmentInfo":generateSegmentInfo(finalPoints),//分段信息
+    "segmentInfo":segmentInfo,//分段信息
     "startPoint":finalPoints[0],//开始点
     "endPoint":finalPoints[finalPoints.length-1],//结束点
     "samplePoints":samplePoints(finalPoints),//轨迹抽样数据（固定数量）
     "avgSpeed":avgSpeed,
+    "moveAvgSpeed":moveAvgSpeed,
     "totalMileage":totalMileage,
     "trajectoryMileage":trajectoryMileage
   }; 
@@ -382,7 +396,7 @@ async function innerOptimize(gpsPoints) {
  * @param {*} second 时间间隔（秒）
  * @returns 平均速度（km/h）
  */
-async function calculateAvgSpeed(totalMileage,second) {
+function calculateAvgSpeed(totalMileage,second) {
   return Number((totalMileage/second)*3.6).toFixed(2)
 }
 
@@ -1236,13 +1250,14 @@ function calculateZoom(boundingBox, mapWidth, mapHeight) {
 
   return Math.min(latZoom, lngZoom, ZOOM_MAX);
 }
+
 /**
  * 生成段落信息 方便展示
  * @param {*} positions GPS坐标
  * @returns 
  */
 function generateSegmentInfo(positions) {
-  const result = [];
+  let result = [];
   let movementStart = null; // 用于记录运动开始的点
   let currentPath = []; // 用于记录当前运动段的路径
 
@@ -1269,9 +1284,11 @@ function generateSegmentInfo(positions) {
             lng: positions[index - 1].lng,
           },
           duration: formatMilliseconds(duration), // 计算运动持续时间
+          durationLong:duration,
           startTime: movementStart.currentTime,
           endTime: positions[index - 1].currentTime,
           distance: formatDistance(totalDistance), // 累加距离
+          distanceLong:totalDistance,
           averageSpeed: `${avgSpeed} km/h`, // 平均速度
         });
 
@@ -1322,9 +1339,11 @@ function generateSegmentInfo(positions) {
           startPosition: movementStart,
           endPosition: { lat: lastPosition.lat, lng: lastPosition.lng },
           duration: formatMilliseconds(duration), // 计算运动持续时间
+          durationLong:duration,
           startTime: movementStart.currentTime,
           endTime: lastPosition.currentTime,
           distance: formatDistance(totalDistance), // 累加最后的总距离
+          distanceLong:totalDistance,
           averageSpeed: `${avgSpeed} km/h` // 平均速度
       });
   }
