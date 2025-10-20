@@ -11,12 +11,13 @@ var config={
     distanceThreshold : 35, // 距离阈值，单位为米
     stationaryEndPoints : 10, // 判断静止状态结束的连续点数
     limitStopPointTime : 10,//停留点时间阈值。单位分钟。如果被识别是停留点，但是时间小于此值，则会被认为是运动点。若未识别为停留点，时间超过此值，则会被认为是停留点。
-     abnormalPointRatio:0.05,//异常点占比阈值。若异常点占比超过此值，则会被认为是异常点识别功能失效或不适合此轨迹
     
     autoOptimize : true, // 是否开启参数自动优化
     autoOptimizeMaxCount : 10,//自动优化调整次数
     
+    abnormalPointRatio:0.05,//异常点占比阈值。若异常点占比超过此值，则会被认为是异常点识别功能失效或不适合此轨迹
     IQRThreshold:2.5,// 异常值检测阈值。此值通常要大于等于1.5
+
     speedIQRThreshold:0.75,// 速度异常值检测阈值
 
     limitSpeed:80,// 最大速度。单位：千米/小时。两点之间的速度超过此值的gps点不参与计算平均速度
@@ -205,6 +206,28 @@ async function innerOptimize(gpsPoints) {
     }
   }
 
+  // //当前点和下个点之间的间隔是否超过limitStopPointTime。超过的话当前点被标记为停留点
+  for(let i=0;i<finalPoints.length-1;i++){
+    let item = finalPoints[i]
+    let nextItem = finalPoints[i+1]
+    if(item.stopTimeSecondsLong||nextItem.stopTimeSecondsLong){
+      continue
+    }
+    const stopTimeSecondsLong = calculateMilliseconds(item.currentTime,nextItem.currentTime)
+    if(stopTimeSecondsLong > config.limitStopPointTime*60*1000){
+        //克隆item和nextItem
+        let stopPoint = {...item}
+        let nextStopPoint = {...nextItem}
+
+        item.startPosition=stopPoint,//开始停留时的GPS点
+        item.endPosition=nextItem,//结束停留时的GPS点
+        item.startTime=stopPoint.currentTime,//停留开始时间
+        item.endTime = nextStopPoint.currentTime,//结束停留时间
+        item.stopTimeSecondsLong=stopTimeSecondsLong,//停留时间的毫秒值
+        item.stopTimeSeconds=formatMilliseconds(stopTimeSecondsLong)//停留时间
+    }
+  }
+  
   //是否合并相距较近的停留点
   if(config.proximityStopMerge){
     finalPoints  = proximityStopMerge(finalPoints)
@@ -253,7 +276,6 @@ async function innerOptimize(gpsPoints) {
   }
   
   // 第四阶段：----------------------------------------------使用IQR算法剔除点距异常大的点（剔毛刺）
-
   //找到里程异常大的点。剔除它。
   //核心的作用是剔除轨迹中的极端偏移毛刺。
   let mileageOutliers = detectMileageOutliers(finalPoints,config.IQRThreshold)
@@ -492,8 +514,9 @@ function detectMileageOutliers(data, k = 1.5) {
   const iqr = q3 - q1;
   const threshold = q3 + k * iqr;
 
+  //如果是停留点则不删除
   return data
-    .map((point, index) => (point.mileage > threshold ? index : -1))
+    .map((point, index) => (point.mileage > threshold && !point.stopTimeSecondsLong ? index : -1))
     .filter(index => index !== -1);
 }
 
