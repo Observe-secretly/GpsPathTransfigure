@@ -13,7 +13,7 @@ var config={
     limitStopPointTime : 10,//停留点时间阈值。单位分钟。如果被识别是停留点，但是时间小于此值，则会被认为是运动点。若未识别为停留点，时间超过此值，则会被认为是停留点。
      abnormalPointRatio:0.05,//异常点占比阈值。若异常点占比超过此值，则会被认为是异常点识别功能失效或不适合此轨迹
     
-    autoOptimize : false, // 是否开启参数自动优化
+    autoOptimize : true, // 是否开启参数自动优化
     autoOptimizeMaxCount : 10,//自动优化调整次数
     
     IQRThreshold:2.5,// 异常值检测阈值。此值通常要大于等于1.5
@@ -194,7 +194,10 @@ async function innerOptimize(gpsPoints) {
         staticEndIndex++;
       }
       const centerPoint = calculateGeographicalCenter(staticPointsSequence);//这个中心点就是质心。是停留点
-      finalPoints.push(centerPoint); // 将中心点加入结果数组
+      //判断识别出来的停留点centerpoint停留时间是否>=limitStopPointTime
+      if(centerPoint.stopTimeSecondsLong >= config.limitStopPointTime*60*1000){
+         finalPoints.push(centerPoint); // 将中心点加入结果数组
+      }
       i = staticEndIndex; // 跳到静止状态结束的点继续处理
     } else {
       finalPoints.push(gpsPoints[i]); // 非静止状态点，直接加入结果数组
@@ -1031,6 +1034,7 @@ function calculateGeographicalCenter(points) {
     const latAvg = Math.atan2(zAvg, hyp);
 
     //这里一定要注意startPosition和endPosition是停止GPS序列的第一个和最后一个。他们并不会出现在轨迹上。所以不代表停留点在轨迹上的上一个和下一个点
+    const stopTimeSecondsLong = calculateMilliseconds(points[0].currentTime,points[points.length-1].currentTime)
     return {
         lat: radiansToDegrees(latAvg),//纬度
         lng: radiansToDegrees(lngAvg),//经度
@@ -1039,7 +1043,8 @@ function calculateGeographicalCenter(points) {
         endPosition:points[points.length-1],//结束停留时的GPS点
         startTime:points[0].currentTime,//停留开始时间
         endTime:points[points.length-1].currentTime,//结束停留时间
-        stopTimeSeconds:formatMilliseconds(calculateMilliseconds(points[0].currentTime,points[points.length-1].currentTime))//停留时间
+        stopTimeSecondsLong:stopTimeSecondsLong,//停留时间的毫秒值
+        stopTimeSeconds:formatMilliseconds(stopTimeSecondsLong)//停留时间
     };
 }
 
