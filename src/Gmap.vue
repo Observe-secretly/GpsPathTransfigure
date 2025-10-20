@@ -50,6 +50,8 @@
     let totalMileage = ref(0);
     //用于可播放的轨迹点
     let playPoints = []
+    //是否把坐标转换成wgs84
+    let isPointsSwitch = ref(false)
     //播放位置
     let playPosition = 0
     //用于播放的marker点
@@ -208,8 +210,15 @@
         var pathParam =[]
         for (var i = 0; i <antResults.data[0].locations.length; i++) {
             var item = antResults.data[0].locations[i]
-            var wgs84Point = gcj02towgs84(item.longitude1,item.latitude1)
-            pathParam[i]={lng: wgs84Point[0],lat: wgs84Point[1],currentTime:item.currentTime}
+            if(isPointsSwitch.value){
+                var wgs84Point = gcj02towgs84(item.longitude1,item.latitude1)
+                pathParam[i]={lng: wgs84Point[0],lat: wgs84Point[1],currentTime:item.currentTime}
+            }else{
+                pathParam[i]={lng: item.longitude1,lat: item.latitude1,currentTime:item.currentTime}
+            }
+           
+            
+            
         }
         GpsPathTransfigure.conf({
             locale:'en',
@@ -319,8 +328,6 @@
             position: { lat: startPoint.lat, lng: startPoint.lng },
             content: startFlagImg,
         });
-
-
 
         const endFlagImg = document.createElement("img");
         endFlagImg.src = "data:image/png;base64,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";

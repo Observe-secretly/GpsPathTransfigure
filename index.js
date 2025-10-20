@@ -261,8 +261,9 @@ async function innerOptimize(gpsPoints) {
   //给轨迹里程赋初值
   let trajectoryMileage = totalMileage 
 
-  let avgSpeed = await calculateAvgSpeed(finalPoints)
-
+  let avgSpeed = await calculateAvgSpeed(totalMileage,
+    calculateMilliseconds(finalPoints[0].currentTime,finalPoints[finalPoints.length-1].currentTime)/1000)
+  
   // 第三阶段：----------------------------------------------轨迹补偿。
   // 土豪玩家根据配置的高德key和谷歌key。对点距超过平均值50的点自动进行两轮车路径规划补点。
   // 效果极佳。但是注意两个问题：1、是两轮车路径规划。请根据自己的场景决定要不要启用；2、数据失真。对数据真实性要求高的用户不要启用。
@@ -345,9 +346,10 @@ async function innerOptimize(gpsPoints) {
     // 重新计算平均速度和总里程。通过分段计算每个轨迹的平均速度和总里程，最后再进行累加
     // 这样做会让平均速度和总里程更加精准。因为分段轨迹已经去掉了异常点和中途信号丢失的轨迹片段
     if(finalPointsSegments.length>1){
-      avgSpeed = await calculateMultipleTrajectoryAvgSpeed(finalPointsSegments)
       trajectoryMileage = await calculateMultipleTrajectoryMileage(finalPointsSegments)
       totalMileage = await calculateSpeedAndMileage(finalPoints)
+      avgSpeed = calculateAvgSpeed(totalMileage,
+        calculateMilliseconds(finalPoints[0].currentTime,finalPoints[finalPoints.length-1].currentTime)/1000)
     }
   }
   
@@ -372,6 +374,16 @@ async function innerOptimize(gpsPoints) {
     "totalMileage":totalMileage,
     "trajectoryMileage":trajectoryMileage
   }; 
+}
+
+/**
+ * 计算平均速度
+ * @param {*} totalMileage 总里程（米）
+ * @param {*} second 时间间隔（秒）
+ * @returns 平均速度（km/h）
+ */
+async function calculateAvgSpeed(totalMileage,second) {
+  return Number((totalMileage/second)*3.6).toFixed(2)
 }
 
 /**
@@ -1235,8 +1247,8 @@ function generateSegmentInfo(positions) {
   let currentPath = []; // 用于记录当前运动段的路径
 
   let totalDistance = 0; // 用于累加运动段中的距离
-  let totalSpeed = 0; // 用于累加运动段中的速度
-  let speedCount = 0; // 用于记录速度值的数量
+  let totalTime = 0; // 用于累加运动段中的时间
+
   positions.forEach((position, index) => {
     // 判断是否是停留点
     if (position.startPosition && position.endPosition) {
@@ -1246,8 +1258,7 @@ function generateSegmentInfo(positions) {
           positions[index - 1].currentTime,
           movementStart.currentTime
         );
-        const avgSpeed =
-          speedCount > 0 ? (totalSpeed / speedCount).toFixed(2) : 0; // 计算平均速度
+        const avgSpeed = (totalDistance / totalTime * 3.6).toFixed(2) // 计算平均速度
 
         result.push({
           type: "motion",
@@ -1268,8 +1279,7 @@ function generateSegmentInfo(positions) {
         currentPath = []; // 重置当前路径
 
         totalDistance = 0; // 重置总距离
-        totalSpeed = 0; // 重置总速度
-        speedCount = 0; // 重置速度计数
+        totalTime = 0; // 重置总时间
       }
 
       // 处理停留点
@@ -1285,11 +1295,7 @@ function generateSegmentInfo(positions) {
     } else {
       // 如果是运动点
       if (!movementStart) {
-        movementStart = {
-          lat: position.lat,
-          lng: position.lng,
-          currentTime: position.currentTime,
-        };
+        movementStart = {...position};
         currentPath.push(movementStart); // 添加当前点到路径中
       } else {
         // 累加每个点之间的距离，并限制为2位小数
@@ -1299,13 +1305,8 @@ function generateSegmentInfo(positions) {
             { lat: position.lat, lng: position.lng }
           )
         );
-        currentPath.push({ lat: position.lat, lng: position.lng ,currentTime: position.currentTime}); // 添加当前点到路径中
-
-        // 累加速度
-        if (position.speed) {
-          totalSpeed += position.speed;
-          speedCount++;
-        }
+        totalTime += calculateMilliseconds(position.currentTime, positions[index - 1].currentTime)/1000;
+        currentPath.push({...position}); // 添加当前点到路径中
       }
     }
   });
@@ -1314,7 +1315,7 @@ function generateSegmentInfo(positions) {
   if (movementStart) {
       const lastPosition = positions[positions.length - 1];
       let duration = calculateMilliseconds(lastPosition.currentTime, movementStart.currentTime);
-      const avgSpeed = speedCount > 0 ? (totalSpeed / speedCount).toFixed(2) : 0; // 计算平均速度
+      const avgSpeed = (totalDistance / totalTime * 3.6).toFixed(2)
       
       result.push({
           type: 'motion',
@@ -1372,7 +1373,7 @@ async function calculateSpeed(point1, point2) {
   var distance = calculateDistance(point1, point2); // 计算两点间的距离（米）
   var timeDiff = calculateMilliseconds(point1.currentTime, point2.currentTime) / 1000; // 时间差（秒）
   if(distance>0&&timeDiff>0){
-    return (distance / timeDiff)*3.6; // 速度（公里/小时）
+    return (distance/ timeDiff)*3.6; // 速度（公里/小时）
   }
   return 0;
 }
@@ -1436,98 +1437,6 @@ async function calculateMultipleTrajectoryMileage(trajectories) {
   }
 
   return totalMileage.toFixed(2);
-}
-
-/**
- * 计算GPS轨迹的平均速度
- * @param {*} points 
- * @returns {Number} 平均速度（公里/小时）
- */
-async function calculateAvgSpeed(points) {
-  let newPoints = [];
-  // 剔除停留点
-  points.forEach(item => {
-    if (!item.stopTimeSeconds) {
-      newPoints.push(item);
-    }
-  });
-  // console.log(newPoints.length)
-  // 剔除添加进去的点
-  // for (let index = 0; index < newPoints.length; index++) {
-  //   console.error(newPoints[index])
-  // }
-  // newPoints = newPoints.filter(item => item.type !== 'add');
-  // console.error(newPoints)
-  
-  if (newPoints.length < 2) {
-    return 0; // 如果有效的点少于2个，返回0
-  }
-
-  
-  // 获取速度集合
-  let speeds = [];
-  for (let index = 1; index < newPoints.length; index++) {
-    speeds.push(newPoints[index].speed);
-  }
-
-  // 去掉相同的最大值和最小值
-  speeds.sort((a, b) => a - b);
-  let min = speeds[0];
-  let max = speeds[speeds.length - 1];
-
-  let filteredSpeeds = speeds.filter(speed => speed !== min && speed !== max);
-
-  if (filteredSpeeds.length === 0) {
-    return 0; // 如果过滤后没有剩余速度，返回0
-  }
-
-  // 计算平均速度
-  let sum = filteredSpeeds.reduce((acc, speed) => acc + speed, 0);
-  let averageSpeed = sum / filteredSpeeds.length;
-
-  return averageSpeed;
-}
-
-/**
- * 并行计算多条轨迹的平均速度并返回总平均值
- * @param {Array<Array>} trajectories 多条轨迹点数组的数组
- * @returns {Number} 所有轨迹平均速度的平均值（公里/小时）
- */
-async function calculateMultipleTrajectoryAvgSpeed(trajectories) {
-  // 记录开始时间
-  const startTime = Date.now()
-  
-  // 使用Promise.all并行处理多条轨迹
-  const avgSpeedResults = await Promise.all(
-    trajectories.map(async (trajectory) => {
-      return await calculateAvgSpeed(trajectory)
-    })
-  )
-  
-  // 计算所有轨迹平均速度的平均值
-  let validSpeeds = avgSpeedResults.filter(speed => speed > 0 && speed < config.limitSpeed)
-  if(config.openDebug){
-    console.debug("固定阈值过滤后的有效速度数组:"+validSpeeds)
-  }
-  
-  validSpeeds = speedFilterIQR(validSpeeds);
-  if(config.openDebug){
-    console.debug("IQR过滤后的有效速度数组:"+validSpeeds)
-  }
-
-  const avgSpeed = validSpeeds.length > 0
-    ? validSpeeds.reduce((sum, speed) => sum + speed, 0) / validSpeeds.length 
-    : 0;
-  
-  // 计算耗时并输出日志
-  const endTime = Date.now()
-  const timeSpent = endTime - startTime
-  if(config.openDebug){
-    console.debug(`并行计算${trajectories.length}条轨迹的平均速度完成,总平均速度${avgSpeed.toFixed(2)}公里/小时,共耗时${timeSpent}毫秒`)
-  }
-  
-  
-  return avgSpeed.toFixed(2);
 }
 
 /**
