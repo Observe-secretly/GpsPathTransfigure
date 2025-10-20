@@ -349,6 +349,7 @@
         const moveFlagImg = document.createElement("img");
         moveFlagImg.src = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAAAXNSR0IArs4c6QAAAjxJREFUaEPdWlGSwiAMJfUsq73AOvu3ejLXk9n923EvoO5ZLDugMC22JZRXhfZHp6WQl7yEJJQE6CqX6y8zlZTyU/8n2uhfKSvzjIi+RVFUp9OPvRcjAsW8bISWQuxGzSNlRYvFPgbMKABK8NFC9yAlIfany9FakauQIABTCO4KSkWxDbEIG8Dq7f1gOc1Vz9hxUlbnv98t53UvgLL82Mi6PnAmQ4/hWGMQwDMo4wPt841eACkIb0PvgIN3Anglbfos0kenTgCr5Vr6TPuK5+fL8UHehxtPjTahWuiITi0AKVLnYZ9w/KEFIFXquCCaVLIAUoo6PmY1Q6sFkIv2DThjBQ0gB+73+YIGkHTk8WSvNwCJxn2fLyga0VT0UY6mBSiKStT1RldppkLzScZ8rtYgdPQZSr6mWIuQ/PdljjpgAKs5bQEYgIAiBOZzqqZGAeBo31AbZgUNABSBONUTHIDq3MAABHQVkJFvBhQCdhu6Co6ukI7yO9Xxg+4DHEeGObDSDBqAmvPpGxlUI4YvSjP3Jq5KI7SyxvZPB9IKFfnyT+bQ2zszD4sfdt/5bwUNMD+Jl4w3g9k451FS5maFzqI+m8rMyXrbja0MfMFNGufVWjT+j8pQefGEP4rV3E21TxTUXk8tKg3lV/M9YrLlX86HfE33ghUhHJ8N6HB4j1mb6+la9nrdoTtszTU4RZEznqOS9pgpkr9QwY1EQRZwocZaxPRPx3wjAQHg0ss2ce3s7c9tdJV2v2KEbq77D8VaZVwO+X8uAAAAAElFTkSuQmCC";
         moveFlagImg.style='width:16px;'
+        moveFlagImg.style.transform = "translate(0px, 8px)";  
         moveMarker = new AdvancedMarkerElement({
             position: { lat: startPoint.lat, lng: startPoint.lng },
             content: moveFlagImg,
