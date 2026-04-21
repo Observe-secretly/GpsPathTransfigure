@@ -12,7 +12,7 @@ var config={
     stationaryEndPoints : 10, // 判断静止状态结束的连续点数
     limitStopPointTime : 10,//停留点时间阈值。单位分钟。如果被识别是停留点，但是时间小于此值，则会被认为是运动点。若未识别为停留点，时间超过此值，则会被认为是停留点。
     
-    autoOptimize : true, // 是否开启参数自动优化
+    autoOptimize : false, // 是否开启参数自动优化
     autoOptimizeMaxCount : 10,//自动优化调整次数
     
     abnormalPointRatio:0.05,//异常点占比阈值。若异常点占比超过此值，则会被认为是异常点识别功能失效或不适合此轨迹
@@ -20,7 +20,7 @@ var config={
 
     speedIQRThreshold:0.75,// 速度异常值检测阈值
 
-    limitSpeed:80,// 最大速度。单位：千米/小时。两点之间的速度超过此值的gps点不参与计算平均速度
+    limitSpeed:150,// 最大速度。单位：千米/小时。两点之间的速度超过此值的gps点不参与计算平均速度
 
     proximityStopThreshold:45,// 近距离停留点距离阈值。此值通常要大于等于distanceThreshold
     proximityStopTimeInterval:60,//近距离停留点时间间隔阈值。单位分钟
