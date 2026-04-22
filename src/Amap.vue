@@ -1,22 +1,8 @@
 <template>
   <div class="mapContainer">
     <div id="amapContainer" style="height: 100vh;" tabindex="0"></div>
-    <div class="scroll-container">
-      <div class="card-container">
-        <div v-for="(segment, index) in segmentInfoData" :key="index" class="card">
-          <div class="card-header">{{ segment.type === 'motion' ? '运动' : '停留' }}</div>
-          <div class="card-body">
-            <p><strong>开始位置:</strong> Lat: {{ segment.startPosition.lat }}, Lng: {{ segment.startPosition.lng }}</p>
-            <p><strong>结束位置:</strong> Lat: {{ segment.endPosition.lat }}, Lng: {{ segment.endPosition.lng }}</p>
-            <p><strong>持续时间:</strong> {{ segment.duration }} </p>
-            <p><strong>时间:</strong> {{ segment.startTime }} - {{ segment.endTime }}</p>
-            <p v-if="segment.type === 'motion'"><strong>平均速度/距离:</strong> {{ segment.averageSpeed }} / {{
-              segment.distance }}</p>
-            <p v-else><strong>平均速度:</strong> {{ segment.averageSpeed }}</p>
-          </div>
-        </div>
-      </div>
-    </div>
+    <TrajectoryPanel :mode="trajectoryViewMode" :collapsed="isSidePanelCollapsed" :segments="segmentInfoData"
+      @changeMode="setTrajectoryViewMode" @toggleCollapsed="toggleSidePanel" />
 
     <div class="map-legend">
       <div class="legend-item">
@@ -55,8 +41,9 @@
 
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import ProgressChart from './component/ProgressChart.vue';
+import TrajectoryPanel from './component/TrajectoryPanel.vue';
 import GpsPathTransfigure from "/index.js"
 import chroma from "chroma-js";
 const segmentInfoData = ref([]);
@@ -76,6 +63,11 @@ let playPosition = ref(0)
 var moveMarker = null
 //国际化语言
 let locale = 'en'
+const trajectoryViewMode = ref('mixed')
+const isSidePanelCollapsed = ref(true)
+let mapInstance = null
+let trajectoryLayerInstance = null
+let rawPathPoints = []
 
 //停留点标注是否可见
 let stopMarker = []
@@ -182,6 +174,14 @@ function hideStopMarker() {
   }
 }
 
+function setTrajectoryViewMode(mode) {
+  trajectoryViewMode.value = mode
+}
+
+function toggleSidePanel(collapsed) {
+  isSidePanelCollapsed.value = collapsed
+}
+
 async function initMap() {
   var antResults = []
 
@@ -194,14 +194,18 @@ async function initMap() {
     var pathParam = []
     for (var i = 0; i < antResults.data[0].locations.length; i++) {
       var item = antResults.data[0].locations[i]
-      pathParam[i] = { lng: item.longitude1, lat: item.latitude1, currentTime: item.currentTime }
+      //把item.t时间戳转换成正常的2025-10-20 00:00:01时间格式
+      const d = new Date(item.t);
+      item.t = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+      pathParam[i] = { lng: item.lo, lat: item.la, currentTime: item.t }
     }
+    rawPathPoints = pathParam
 
     GpsPathTransfigure.conf({
       locale: locale,
       aMapKey: webApiKey,
       defaultMapService: 'amap',
-      openDebug: false,
+      openDebug: true,
       pathColorOptimize: true,
       samplePointsNum: 300,
     })
@@ -219,6 +223,7 @@ async function initMap() {
       mapStyle: "amap://styles/macaron",
       zoom: zoom
     });
+    mapInstance = map;
 
     for (var i = 0; i < stopPoints.length; i += 1) {
       var stopPoint = stopPoints[i]
@@ -265,6 +270,63 @@ async function initMap() {
     /**
      * 使用 CustomLayer+Canvas 绘制轨迹，避免创建海量 Polyline 导致 rAF 拖慢
      */
+    const drawRawPath = (ctx) => {
+      if (!rawPathPoints || rawPathPoints.length < 2) return;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(120, 120, 120, 0.8)';
+      ctx.lineWidth = 2;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      for (let i = 0; i < rawPathPoints.length; i++) {
+        const lnglat = rawPathPoints[i];
+        const pixel = map.lngLatToContainer([lnglat.lng, lnglat.lat]);
+        if (i === 0) {
+          ctx.moveTo(pixel.x, pixel.y);
+        } else {
+          ctx.lineTo(pixel.x, pixel.y);
+        }
+      }
+      ctx.stroke();
+      ctx.restore();
+    };
+
+    const drawOptimizedPath = (ctx) => {
+      trajectoryPoints.forEach(item => {
+        const path = item.path;
+        if (!path || path.length < 2) return;
+
+        ctx.save();
+        // 停漂段用虚线，其余用对应颜色
+        if (item.type == 'add' || item.type == 'drift') {
+          ctx.strokeStyle = '#959595';
+          ctx.globalAlpha = 0.8;
+          ctx.lineWidth = 3;
+          ctx.setLineDash([4, 4]);
+        } else {
+          ctx.strokeStyle = item.color || '#959595';
+          ctx.lineWidth = 3;
+          ctx.lineJoin = 'round';
+          ctx.lineCap = 'round';
+          ctx.setLineDash([]);
+        }
+
+        ctx.beginPath();
+        for (let i = 0; i < path.length; i++) {
+          const lnglat = path[i];
+          const pixel = map.lngLatToContainer([lnglat.lng, lnglat.lat]);
+          if (i === 0) {
+            ctx.moveTo(pixel.x, pixel.y);
+          } else {
+            ctx.lineTo(pixel.x, pixel.y);
+          }
+        }
+        ctx.stroke();
+        ctx.restore();
+      });
+    };
+
     const canvas = document.createElement('canvas');
     const trajectoryLayer = new AMap.CustomLayer(canvas, {
       zIndex: 50,
@@ -279,42 +341,17 @@ async function initMap() {
         const ctx = canvas.getContext('2d');
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, size.width, size.height);
-
-        trajectoryPoints.forEach(item => {
-          const path = item.path;
-          if (!path || path.length < 2) return;
-
-          ctx.save();
-          // 停漂段用虚线，其余用对应颜色
-          if (item.type == 'add' || item.type == 'drift') {
-            ctx.strokeStyle = '#959595';
-            ctx.globalAlpha = 0.8;
-            ctx.lineWidth = 3;
-            ctx.setLineDash([4, 4]);
-          } else {
-            ctx.strokeStyle = item.color || '#959595';
-            ctx.lineWidth = 3;
-            ctx.lineJoin = 'round';
-            ctx.lineCap = 'round';
-            ctx.setLineDash([]);
-          }
-
-          ctx.beginPath();
-          for (let i = 0; i < path.length; i++) {
-            const lnglat = path[i];
-            const pixel = map.lngLatToContainer([lnglat.lng, lnglat.lat]);
-            if (i === 0) {
-              ctx.moveTo(pixel.x, pixel.y);
-            } else {
-              ctx.lineTo(pixel.x, pixel.y);
-            }
-          }
-          ctx.stroke();
-          ctx.restore();
-        });
+        const currentMode = trajectoryViewMode.value;
+        if (currentMode === 'raw' || currentMode === 'mixed') {
+          drawRawPath(ctx);
+        }
+        if (currentMode === 'optimized' || currentMode === 'mixed') {
+          drawOptimizedPath(ctx);
+        }
       }
     });
     trajectoryLayer.setMap(map);
+    trajectoryLayerInstance = trajectoryLayer;
 
     //初始化一个用于播放的marker点
     moveMarker = new AMap.Marker({
@@ -339,6 +376,27 @@ onMounted(async () => {
     initMap()
   }, 1000)
 
+})
+
+watch(trajectoryViewMode, () => {
+  if (!trajectoryLayerInstance || !mapInstance) return;
+
+  // 原始轨迹模式下不显示停留点标注；其他模式按当前播放状态决定是否恢复
+  if (trajectoryViewMode.value === 'raw') {
+    hideStopMarker()
+  } else {
+    if (!isPlaying.value && playPosition.value === 0) {
+      showStopMarker()
+    }
+  }
+
+  if (typeof trajectoryLayerInstance.reFresh === 'function') {
+    trajectoryLayerInstance.reFresh();
+    return;
+  }
+
+  trajectoryLayerInstance.setMap(null);
+  trajectoryLayerInstance.setMap(mapInstance);
 })
 
 

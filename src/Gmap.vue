@@ -1,21 +1,8 @@
 <template>
     <div class="mapContainer">
         <div id="gmapContainer" style="height: 100vh;" ></div>
-        <div class="scroll-container">
-            <div class="card-container">
-                <div v-for="(segment, index) in segmentInfoData" :key="index" class="card">
-                <div class="card-header">{{ segment.type === 'motion' ? '运动' : '停留' }}</div>
-                <div class="card-body">
-                    <p><strong>开始位置:</strong> Lat: {{ segment.startPosition.lat }}, Lng: {{ segment.startPosition.lng }}</p>
-                    <p><strong>结束位置:</strong> Lat: {{ segment.endPosition.lat }}, Lng: {{ segment.endPosition.lng }}</p>
-                    <p><strong>持续时间:</strong> {{ segment.duration }} </p>
-                    <p><strong>时间:</strong> {{ segment.startTime }} - {{ segment.endTime }}</p>
-                    <p v-if="segment.type === 'motion'"><strong>平均速度/距离:</strong> {{ segment.averageSpeed }} / {{ segment.distance }}</p>
-                    <p v-else><strong>平均速度:</strong> {{ segment.averageSpeed }}</p>
-                </div>
-                </div>
-            </div>
-        </div> 
+        <TrajectoryPanel :mode="trajectoryViewMode" :collapsed="isSidePanelCollapsed" :segments="segmentInfoData"
+            @changeMode="setTrajectoryViewMode" @toggleCollapsed="toggleSidePanel" />
 
         <div class="map-legend">
             <div class="legend-item">
@@ -43,7 +30,8 @@
 
 </template>
 <script setup>
-    import { ref, onMounted } from 'vue';
+    import { ref, onMounted, watch } from 'vue';
+    import TrajectoryPanel from './component/TrajectoryPanel.vue';
     import GpsPathTransfigure from "/index.js"
     import chroma from "chroma-js";
     // 状态变量：true表示播放，false表示暂停
@@ -67,6 +55,14 @@
     let stopMarker=[]
 
     let map = null
+
+    const trajectoryViewMode = ref('mixed')
+    const isSidePanelCollapsed = ref(true)
+    let rawPathPoints = []
+    let rawPolyline = null
+    let optimizedPolylines = []
+    let optimizedTrajectoryPoints = []
+    let optimizedLineSymbol = null
 
 
     const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -143,6 +139,103 @@
       stopMarker.map(item=>{
         item.setMap(null);
       })
+    }
+  }
+
+  function setTrajectoryViewMode(mode){
+    trajectoryViewMode.value = mode
+  }
+
+  function toggleSidePanel(collapsed){
+    isSidePanelCollapsed.value = collapsed
+  }
+
+  function clearOptimizedPolylines(){
+    if(optimizedPolylines.length>0){
+      optimizedPolylines.forEach(p=>p.setMap(null))
+    }
+    optimizedPolylines = []
+  }
+
+  function ensureRawPolyline(){
+    if(!map || !rawPathPoints || rawPathPoints.length<2) return null
+    if(rawPolyline) return rawPolyline
+    const path = rawPathPoints.map(p=>({lat:p.lat,lng:p.lng}))
+    rawPolyline = new google.maps.Polyline({
+      path,
+      strokeColor: '#787878',
+      strokeOpacity: 0.75,
+      strokeWeight: 2,
+    })
+    return rawPolyline
+  }
+
+  function drawOptimizedTrajectories(){
+    if(!map || !optimizedTrajectoryPoints || optimizedTrajectoryPoints.length===0) return
+    clearOptimizedPolylines()
+    for(let i=0;i<optimizedTrajectoryPoints.length;i+=1){
+        let item = optimizedTrajectoryPoints[i]
+        if(item.type=='add' || item.type=='drift'){
+            const p = new google.maps.Polyline({
+                path: item.path,
+                strokeColor: '#959595',
+                strokeOpacity: 0.3,
+                strokeWeight: 3,
+                icons: optimizedLineSymbol ? [
+                    {
+                    icon: optimizedLineSymbol,
+                    offset: '0%',
+                    repeat: '30px'
+                    }
+                ] : undefined
+            })
+            p.setMap(map);
+            optimizedPolylines.push(p)
+        }else{
+            let nextItem = optimizedTrajectoryPoints[i + 1];
+            let nextColor = nextItem ? nextItem.color : item.color;
+            let segmentCount = 10;
+            let gradientColors = chroma.scale([item.color, nextColor?nextColor:'#959595']).colors(segmentCount);
+            for (let k = 0; k < segmentCount; k++) {
+                let startFactor = k / segmentCount;
+                let endFactor = (k + 1) / segmentCount;
+                let segmentPath = [
+                    item.path[Math.floor(startFactor * (item.path.length - 1))],
+                    item.path[Math.floor(endFactor * (item.path.length - 1))]
+                ];
+                let segmentColor = gradientColors[k];
+                const p = new google.maps.Polyline({
+                    path: segmentPath,
+                    strokeColor: segmentColor,
+                    strokeOpacity: 0.8,
+                    strokeWeight: 3,
+                })
+                p.setMap(map);
+                optimizedPolylines.push(p)
+            }
+        }
+    }
+  }
+
+  function renderTrajectories(){
+    if(!map) return
+    const mode = trajectoryViewMode.value
+    // raw
+    if(mode === 'raw' || mode === 'mixed'){
+      const p = ensureRawPolyline()
+      if(p) p.setMap(map)
+    }else{
+      if(rawPolyline) rawPolyline.setMap(null)
+    }
+    // optimized
+    if(mode === 'optimized' || mode === 'mixed'){
+      if(optimizedPolylines.length===0){
+        drawOptimizedTrajectories()
+      }else{
+        optimizedPolylines.forEach(p=>p.setMap(map))
+      }
+    }else{
+      clearOptimizedPolylines()
     }
   }
 
@@ -226,6 +319,7 @@
             
             
         }
+        rawPathPoints = pathParam
         GpsPathTransfigure.conf({
             locale:'en',
             gMapKey:apiKey,
@@ -252,65 +346,14 @@
             mapTypeId: "terrain",
         });
 
-
-        var lineSymbol = {
+        optimizedLineSymbol = {
             path: google.maps.SymbolPath.CIRCLE, // 自定义箭头形状的SVG路径
             scale: 1,
             strokeOpacity: 1,// 透明度
             strokeColor: '#959595',
         };
-
-        for(var i=0;i<trajectoryPoints.length;i+=1){
-            let item = trajectoryPoints[i]
-            
-            if(item.type=='add' || item.type=='drift'){
-                new google.maps.Polyline({
-                    path: item.path,
-                    strokeColor: '#959595',
-                    strokeOpacity: 0.3,
-                    strokeWeight: 3,
-                    icons: [
-                        {
-                        icon: lineSymbol,
-                        offset: '0%',
-                        repeat: '30px' // 每隔多少px重复显示箭头
-                        }
-                    ]
-                }).setMap(map);
-
-            }else{
-                // 处理渐变色部分
-                let nextItem = trajectoryPoints[i + 1]; // 获取下一个轨迹片段
-                let nextColor = nextItem ? nextItem.color : item.color; // 如果没有下一个，则保持当前颜色
-
-                let segmentCount = 10; // 将路径分成10段
-                // 使用Chroma.js生成颜色过渡数组
-                let gradientColors = chroma.scale([item.color, nextColor?nextColor:'#959595']).colors(segmentCount);
-
-                for (let k = 0; k < segmentCount; k++) {
-                    let startFactor = k / segmentCount;
-                    let endFactor = (k + 1) / segmentCount;
-                    
-                    let segmentPath = [
-                        item.path[Math.floor(startFactor * (item.path.length - 1))],
-                        item.path[Math.floor(endFactor * (item.path.length - 1))]
-                    ];
-
-                    let segmentColor = gradientColors[k]; // 取Chroma.js生成的渐变颜色
-
-                    // 渲染每个小线段
-                    new google.maps.Polyline({
-                        path: segmentPath,
-                        strokeColor: segmentColor,
-                        strokeOpacity: 0.8,
-                        strokeWeight: 3,
-                    }).setMap(map);
-                    
-                }
-
-            }
-
-        }
+        optimizedTrajectoryPoints = trajectoryPoints
+        renderTrajectories()
         
         stopPoints.map(item=>{
             const beachFlagImg = document.createElement("img");
@@ -357,6 +400,19 @@
 
 
     }
+
+    watch(trajectoryViewMode, () => {
+      if(trajectoryViewMode.value === 'raw'){
+        hideStopMarker()
+      }else{
+        if(!isPlaying.value && playPosition === 0){
+          showStopMarker()
+        }
+      }
+      if(map){
+        renderTrajectories()
+      }
+    })
 
 
     onMounted(async() => {
