@@ -20,17 +20,6 @@
             </div>
         </div>
 
-        <div v-if="autoOptimizeDiagnostics" class="autoopt-diagnostics">
-            <div class="diag-title">自动优化诊断</div>
-            <div class="diag-row">优化轮次: {{ autoOptimizeDiagnostics.rounds?.length || 0 }}</div>
-            <div class="diag-row">最佳分数: {{ autoOptimizeDiagnostics.bestEvaluation?.score ?? '-' }}</div>
-            <div class="diag-row">最佳半径: {{ autoOptimizeDiagnostics.bestEvaluation?.distanceThreshold ?? '-' }} m</div>
-            <div class="diag-row">最佳结束点数: {{ autoOptimizeDiagnostics.bestEvaluation?.stationaryEndPoints ?? '-' }}</div>
-            <div class="diag-row">当前保留率: {{ formatRatio(autoOptimizeDiagnostics.currentEvaluation?.trackPointRetentionRatio) }}</div>
-            <div class="diag-row">当前里程偏差: {{ formatRatio(autoOptimizeDiagnostics.currentEvaluation?.mileageDeviationRatio) }}</div>
-            <div class="diag-row">当前停留点变化: {{ formatRatio(autoOptimizeDiagnostics.currentEvaluation?.stopPointChangeRatio) }}</div>
-        </div>
-
         <button class="floating-button" v-on:click ="switchPlay">
             <img v-if="isPlaying==false" src="data:image/png;base64,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" alt="Play">
             <img v-if="isPlaying==true" src="data:image/png;base64,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" >
@@ -52,8 +41,7 @@
     // 平均速度和总里程
     let avgSpeed = ref(0);
     let moveAvgSpeed = ref(0);
-    let totalMileage = ref(0);
-    let autoOptimizeDiagnostics = ref(null);
+    let totalMileage = ref(0);  
     //用于可播放的轨迹点
     let playPoints = []
     //是否把坐标转换成wgs84
@@ -348,17 +336,12 @@
             pathColorOptimize:true,
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
-        const { finalPoints, stopPoints,trajectoryPoints,center, zoom ,segmentInfo,startPoint,endPoint,moveAvgSpeed:move_avg_speed,avgSpeed: speed_avg,totalMileage: mileage_total,samplePoints, autoOptimizeDiagnostics: auto_opt_diag} = staticPoints;
+        const { finalPoints, stopPoints,trajectoryPoints,center, zoom ,segmentInfo,startPoint,endPoint,moveAvgSpeed:move_avg_speed,avgSpeed: speed_avg,totalMileage: mileage_total,samplePoints} = staticPoints;
         moveAvgSpeed.value = move_avg_speed
         avgSpeed.value = speed_avg
         totalMileage.value = Number((mileage_total/1000).toFixed(2));
         segmentInfoData.value = segmentInfo
         playPoints = finalPoints
-        autoOptimizeDiagnostics.value = auto_opt_diag
-        if (auto_opt_diag?.rounds?.length) {
-          console.table(auto_opt_diag.rounds)
-        }
-
         const { Map } = await google.maps.importLibrary("maps");
         const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
 

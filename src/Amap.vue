@@ -19,17 +19,6 @@
       </div>
     </div>
 
-    <div v-if="autoOptimizeDiagnostics" class="autoopt-diagnostics">
-      <div class="diag-title">自动优化诊断</div>
-      <div class="diag-row">优化轮次: {{ autoOptimizeDiagnostics.rounds?.length || 0 }}</div>
-      <div class="diag-row">最佳分数: {{ autoOptimizeDiagnostics.bestEvaluation?.score ?? '-' }}</div>
-      <div class="diag-row">最佳半径: {{ autoOptimizeDiagnostics.bestEvaluation?.distanceThreshold ?? '-' }} m</div>
-      <div class="diag-row">最佳结束点数: {{ autoOptimizeDiagnostics.bestEvaluation?.stationaryEndPoints ?? '-' }}</div>
-      <div class="diag-row">当前保留率: {{ formatRatio(autoOptimizeDiagnostics.currentEvaluation?.trackPointRetentionRatio) }}</div>
-      <div class="diag-row">当前里程偏差: {{ formatRatio(autoOptimizeDiagnostics.currentEvaluation?.mileageDeviationRatio) }}</div>
-      <div class="diag-row">当前停留点变化: {{ formatRatio(autoOptimizeDiagnostics.currentEvaluation?.stopPointChangeRatio) }}</div>
-    </div>
-
     <div class="progress">
       <ProgressChart :locale="locale" :data="playPoints" :onMove="handleMove" :setPosition="playPosition"
         sliderImage="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAAAXNSR0IArs4c6QAAASBJREFUaEPtltENgkAQRO/q0H6oRNsQ29BK6EfrwGBi4gey9zIsCXH85bG3s7NyU8vOf3Xn/RcLOJ6HfhzLZXKy1nJ93Lp+yVXKRxsiOfDdzOegJRGUj5p/D60F+sUcTsM49+x572brUr6lt/8WQFeC8ukOTAfQPyXlIxHSCkXFt3huAVtMeekMO2AHxAnIK0Q/i5SP9EkC6MVE+ah5ZyEaziif7gBdCcqnC3AWahlxwEhfoRXOl0tYgDxCsYAdEAcovy47QLMN5SOFkgB6MVE+at5ZiGYbyqc7QFeC8ukCnIVaRuwstMKUMktI90BmY621LaB1Ulmc7ADNNpSPhEsC6MVE+ah5ZyGabSif7gBdCcqnC3AWahmxs9AKU8os8QK/SiBAyMIBIAAAAABJRU5ErkJggg==" />
@@ -66,7 +55,6 @@ let speed = ref(-1);
 let avgSpeed = ref(0);
 let moveAvgSpeed = ref(0);
 let totalMileage = ref(0);
-let autoOptimizeDiagnostics = ref(null);
 //用于可播放的轨迹点
 let playPoints = []
 //播放位置
@@ -229,16 +217,12 @@ async function initMap() {
       samplePointsNum: 300,
     })
     const staticPoints = await GpsPathTransfigure.optimize(pathParam);
-    const { finalPoints, trajectoryPoints, stopPoints, center, zoom, segmentInfo, startPoint, endPoint, moveAvgSpeed: move_avg_speed, avgSpeed: speed_avg, totalMileage: mileage_total, autoOptimizeDiagnostics: auto_opt_diag } = staticPoints;
+    const { finalPoints, trajectoryPoints, stopPoints, center, zoom, segmentInfo, startPoint, endPoint, moveAvgSpeed: move_avg_speed, avgSpeed: speed_avg, totalMileage: mileage_total} = staticPoints;
     segmentInfoData.value = segmentInfo
     playPoints = finalPoints
     avgSpeed.value = speed_avg
     moveAvgSpeed.value = move_avg_speed
     totalMileage.value = parseFloat(mileage_total / 1000).toFixed(2)
-    autoOptimizeDiagnostics.value = auto_opt_diag
-    if (auto_opt_diag?.rounds?.length) {
-      console.table(auto_opt_diag.rounds)
-    }
 
     var map = new AMap.Map('amapContainer', {
       resizeEnable: true,

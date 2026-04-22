@@ -12,18 +12,8 @@ var config={
     stationaryEndPoints : 10, // 判断静止状态结束的连续点数
     limitStopPointTime : 10,//停留点时间阈值。单位分钟。如果被识别是停留点，但是时间小于此值，则会被认为是运动点。若未识别为停留点，时间超过此值，则会被认为是停留点。
     
-    autoOptimize : true, // 是否开启参数自动优化
+    autoOptimize : false, // 是否开启参数自动优化
     autoOptimizeMaxCount : 10,//自动优化调整次数
-    autoOptimizeDistanceThresholdStep:5,//自动优化时距离阈值每轮增量（米）
-    autoOptimizeStationaryEndPointsStep:3,//自动优化时静止结束连续点数每轮增量
-    autoOptimizeDistanceThresholdMin:20,//自动优化时距离阈值下限（米）
-    autoOptimizeDistanceThresholdMax:80,//自动优化时距离阈值上限（米）
-    autoOptimizeStationaryEndPointsMin:5,//自动优化时静止结束连续点数下限
-    autoOptimizeStationaryEndPointsMax:40,//自动优化时静止结束连续点数上限
-    autoOptimizeCloseStopPointRatioThreshold:0.2,//自动优化触发阈值：近邻停留点占比超过该值才继续优化
-    minTrackPointRetentionRatio:0.85,//护栏：轨迹点保留率下限
-    maxMileageDeviationRatio:0.10,//护栏：总里程偏差率上限
-    maxStopPointChangeRatio:0.50,//护栏：停留点数量变化率上限（相对上一轮）
     
     abnormalPointRatio:0.05,//异常点占比阈值。若异常点占比超过此值，则会被认为是异常点识别功能失效或不适合此轨迹
     IQRThreshold:2.5,// 异常值检测阈值。此值通常要大于等于1.5
@@ -142,41 +132,16 @@ function noiseRecognitionFilter(points) {
 async function optimize(gpsPoints) {
   //去除噪点 
   let newGpsPoints = noiseRecognitionFilter(gpsPoints)
-  const autoOptimizeContext = await createAutoOptimizeContext(newGpsPoints)
   
   if(config.autoOptimize){
     //反复渲染轨迹时，为了确保自动优化每次都生效，需要重置自动优化次数
     autoOptimizeCount = 0
-    //自动优化的配置项重置，使用本轮调用的起始值，避免覆盖用户配置
-    config.distanceThreshold = autoOptimizeContext.baseDistanceThreshold
-    config.stationaryEndPoints = autoOptimizeContext.baseStationaryEndPoints
+    //自动优化的配置项重置
+    config.distanceThreshold = 35
+    config.stationaryEndPoints = 10
   }
   
-  return  innerOptimize(newGpsPoints,autoOptimizeContext)
-}
-
-async function createAutoOptimizeContext(gpsPoints){
-  const baseDistanceThreshold = config.distanceThreshold
-  const baseStationaryEndPoints = config.stationaryEndPoints
-  const baselinePointCount = gpsPoints.length
-  const baselineMileage = baselinePointCount > 1
-    ? await calculateSpeedAndMileage(gpsPoints.map(item => ({ ...item })))
-    : 0
-
-  return {
-    baseDistanceThreshold,
-    baseStationaryEndPoints,
-    baselinePointCount,
-    baselineMileage,
-    previousStopPointCount:null,
-    bestScore:Number.POSITIVE_INFINITY,
-    bestEvaluation:null,
-    lastAcceptedDistanceThreshold:baseDistanceThreshold,
-    lastAcceptedStationaryEndPoints:baseStationaryEndPoints,
-    optimizationRounds:[],
-    haltOptimization:false,
-    rollbackApplied:false
-  }
+  return  innerOptimize(newGpsPoints)
 }
 
 /**
@@ -184,7 +149,7 @@ async function createAutoOptimizeContext(gpsPoints){
  * @param {*} gpsPoints 
  * @returns 
  */
-async function innerOptimize(gpsPoints,optimizeContext) {
+async function innerOptimize(gpsPoints) {
 
   // 第一阶段：----------------------------------------------寻找停留点
   var finalPoints = []; // 存储最终的轨迹点
@@ -274,70 +239,25 @@ async function innerOptimize(gpsPoints,optimizeContext) {
   let stopPoints = []
   stopPoints = dismantleStopPoint(finalPoints)
 
-  //计算速度和里程
-  let totalMileage = await calculateSpeedAndMileage(finalPoints)
-  let currentOptimizeEvaluation = null
-  
   if(config.autoOptimize){
-    currentOptimizeEvaluation = evaluateAutoOptimizeMetrics(stopPoints, finalPoints.length, totalMileage, optimizeContext)
-    optimizeContext.optimizationRounds.push(currentOptimizeEvaluation)
-
-    if(currentOptimizeEvaluation.guardrailPassed){
-      optimizeContext.previousStopPointCount = stopPoints.length
-      optimizeContext.lastAcceptedDistanceThreshold = config.distanceThreshold
-      optimizeContext.lastAcceptedStationaryEndPoints = config.stationaryEndPoints
-
-      if(currentOptimizeEvaluation.score < optimizeContext.bestScore){
-        optimizeContext.bestScore = currentOptimizeEvaluation.score
-        optimizeContext.bestEvaluation = currentOptimizeEvaluation
-      }
-    }else if(!optimizeContext.rollbackApplied){
-      optimizeContext.rollbackApplied = true
-      optimizeContext.haltOptimization = true
-      config.distanceThreshold = optimizeContext.lastAcceptedDistanceThreshold
-      config.stationaryEndPoints = optimizeContext.lastAcceptedStationaryEndPoints
-
+    if(autoAdjustThreshold(stopPoints) && autoOptimizeCount < config.autoOptimizeMaxCount){
+      autoOptimizeCount+=1
+  
+      config.distanceThreshold= config.distanceThreshold+5
+      config.stationaryEndPoints = config.stationaryEndPoints+3
+  
       if(config.openDebug){
-        console.log("自动优化触发护栏，回退到上一轮可接受参数")
+        console.log(`第${autoOptimizeCount}次优化`)
         console.log(config.distanceThreshold,'距离阈值')
         console.log(config.stationaryEndPoints,'静止状态结束的连续点数')
       }
-      return innerOptimize(gpsPoints,optimizeContext)
-    }else{
-      optimizeContext.haltOptimization = true
-    }
-
-    const shouldContinue = shouldContinueAutoOptimize(currentOptimizeEvaluation,optimizeContext)
-    if(shouldContinue && autoOptimizeCount < config.autoOptimizeMaxCount){
-      autoOptimizeCount+=1
-      const nextDistanceThreshold = clamp(
-        config.distanceThreshold + config.autoOptimizeDistanceThresholdStep,
-        config.autoOptimizeDistanceThresholdMin,
-        config.autoOptimizeDistanceThresholdMax
-      )
-      const nextStationaryEndPoints = clamp(
-        config.stationaryEndPoints + config.autoOptimizeStationaryEndPointsStep,
-        config.autoOptimizeStationaryEndPointsMin,
-        config.autoOptimizeStationaryEndPointsMax
-      )
-
-      if(nextDistanceThreshold === config.distanceThreshold && nextStationaryEndPoints === config.stationaryEndPoints){
-        optimizeContext.haltOptimization = true
-      }else{
-        config.distanceThreshold = nextDistanceThreshold
-        config.stationaryEndPoints = nextStationaryEndPoints
-
-        if(config.openDebug){
-          console.log(`第${autoOptimizeCount}次优化`)
-          console.log(config.distanceThreshold,'距离阈值')
-          console.log(config.stationaryEndPoints,'静止状态结束的连续点数')
-        }
-    
-        return innerOptimize(gpsPoints,optimizeContext)
-      }
+  
+      return innerOptimize(gpsPoints)
     }
   }
-  
+
+  //计算速度和里程
+  let totalMileage = await calculateSpeedAndMileage(finalPoints)
   //给轨迹里程赋初值
   let trajectoryMileage = totalMileage 
 
@@ -437,12 +357,6 @@ async function innerOptimize(gpsPoints,optimizeContext) {
   //此时轨迹处理结束。由于降噪的原因，需要重新获取还存在的停留点。
   stopPoints = dismantleStopPoint(finalPoints)
 
-  const autoOptimizeDiagnostics = buildAutoOptimizeDiagnostics(optimizeContext, currentOptimizeEvaluation)
-  if(config.openDebug && autoOptimizeDiagnostics){
-    console.log("自动优化回归基线", autoOptimizeDiagnostics.regressionBaseline)
-    console.log("自动优化轮次明细", autoOptimizeDiagnostics.rounds)
-  }
-
   //轨迹分段信息
   let segmentInfo = generateSegmentInfo(finalPoints)
   let moveAvgSpeed = 0
@@ -472,8 +386,7 @@ async function innerOptimize(gpsPoints,optimizeContext) {
     "avgSpeed":avgSpeed,
     "moveAvgSpeed":moveAvgSpeed,
     "totalMileage":totalMileage,
-    "trajectoryMileage":trajectoryMileage,
-    "autoOptimizeDiagnostics":autoOptimizeDiagnostics
+    "trajectoryMileage":trajectoryMileage
   }; 
 }
 
@@ -655,60 +568,14 @@ function percentile(sortedNums, p) {
  * @param {Array} stopPoints - 包含停留点坐标的数组，每个坐标是一个对象，具有lat和lng属性
  * @returns {Boolean} - 若占比超过一定值则返回true，否则返回false
  */
-function evaluateAutoOptimizeMetrics(stopPoints, finalPointCount, totalMileage, optimizeContext) {
-  const closeStopPointRatio = calculateCloseStopPointRatio(stopPoints)
-  const trackPointRetentionRatio = optimizeContext.baselinePointCount > 0
-    ? finalPointCount / optimizeContext.baselinePointCount
-    : 1
-  const mileageDeviationRatio = optimizeContext.baselineMileage > 0
-    ? Math.abs(totalMileage - optimizeContext.baselineMileage) / optimizeContext.baselineMileage
-    : 0
-  const stopPointChangeRatio = calculateStopPointChangeRatio(
-    stopPoints.length,
-    optimizeContext.previousStopPointCount
-  )
-
-  const guardrailPassed =
-    trackPointRetentionRatio >= config.minTrackPointRetentionRatio &&
-    mileageDeviationRatio <= config.maxMileageDeviationRatio &&
-    stopPointChangeRatio <= config.maxStopPointChangeRatio
-
-  const retentionPenalty = normalizedPenalty(trackPointRetentionRatio, config.minTrackPointRetentionRatio, "min")
-  const mileagePenalty = normalizedPenalty(mileageDeviationRatio, config.maxMileageDeviationRatio, "max")
-  const stopPointPenalty = normalizedPenalty(stopPointChangeRatio, config.maxStopPointChangeRatio, "max")
-  const score = Number((closeStopPointRatio + retentionPenalty + mileagePenalty + stopPointPenalty).toFixed(6))
-
-  return {
-    iteration:autoOptimizeCount,
-    distanceThreshold:config.distanceThreshold,
-    stationaryEndPoints:config.stationaryEndPoints,
-    stopPointCount:stopPoints.length,
-    closeStopPointRatio:Number(closeStopPointRatio.toFixed(6)),
-    trackPointRetentionRatio:Number(trackPointRetentionRatio.toFixed(6)),
-    mileageDeviationRatio:Number(mileageDeviationRatio.toFixed(6)),
-    stopPointChangeRatio:Number(stopPointChangeRatio.toFixed(6)),
-    guardrailPassed,
-    score,
-    totalMileage
-  }
-}
-
-function shouldContinueAutoOptimize(evaluation, optimizeContext){
-  if(optimizeContext.haltOptimization){
-    return false
-  }
-
-  const closeStopCondition = evaluation.closeStopPointRatio > config.autoOptimizeCloseStopPointRatioThreshold
-  const betterScore = evaluation.score <= optimizeContext.bestScore
-  return closeStopCondition && evaluation.guardrailPassed && betterScore
-}
-
-function calculateCloseStopPointRatio(stopPoints) {
+function autoAdjustThreshold(stopPoints) {
   if (!stopPoints || stopPoints.length === 0) {
-      return 0;
+      return false;
   }
 
   const thresholdDistance = config.distanceThreshold; // 距离阈值，单位：米
+  const thresholdRatio = 0.2; // 占比阈值
+
   let closePointsCount = 0;
 
   for (let i = 0; i < stopPoints.length; i++) {
@@ -727,52 +594,9 @@ function calculateCloseStopPointRatio(stopPoints) {
       }
   }
 
-  return closePointsCount / stopPoints.length;
-}
+  const ratio = closePointsCount / stopPoints.length;
 
-function calculateStopPointChangeRatio(currentStopPointCount, previousStopPointCount){
-  if(previousStopPointCount === null || previousStopPointCount === undefined){
-    return 0
-  }
-  if(previousStopPointCount === 0){
-    return currentStopPointCount > 0 ? 1 : 0
-  }
-  return Math.abs(currentStopPointCount - previousStopPointCount) / previousStopPointCount
-}
-
-function normalizedPenalty(value, threshold, mode){
-  if(threshold <= 0){
-    return 0
-  }
-  if(mode === "min"){
-    return value >= threshold ? 0 : Number(((threshold - value) / threshold).toFixed(6))
-  }
-  return value <= threshold ? 0 : Number(((value - threshold) / threshold).toFixed(6))
-}
-
-function buildAutoOptimizeDiagnostics(optimizeContext, currentOptimizeEvaluation){
-  if(!config.autoOptimize || !optimizeContext){
-    return null
-  }
-
-  const rounds = optimizeContext.optimizationRounds
-  const bestEvaluation = optimizeContext.bestEvaluation || currentOptimizeEvaluation
-  return {
-    rounds,
-    bestEvaluation,
-    currentEvaluation:currentOptimizeEvaluation,
-    regressionBaseline:{
-      baselinePointCount:optimizeContext.baselinePointCount,
-      baselineMileage:optimizeContext.baselineMileage,
-      minTrackPointRetentionRatio:config.minTrackPointRetentionRatio,
-      maxMileageDeviationRatio:config.maxMileageDeviationRatio,
-      maxStopPointChangeRatio:config.maxStopPointChangeRatio
-    }
-  }
-}
-
-function clamp(value, min, max){
-  return Math.max(min, Math.min(max, value))
+  return ratio > thresholdRatio;
 }
 
 /**
@@ -1188,10 +1012,7 @@ function proximityStopMerge(points){
           const timeInterval = calculateMilliseconds(points[i].currentTime,points[j].currentTime)/(1000*60)
 
           //如果比较时间间隔超过一定时间则后续的比较不做了
-          if(timeInterval > config.proximityStopTimeInterval){
-            if(config.openDebug){
-              console.log(`停留点合并截止：时间间隔${timeInterval.toFixed(2)}分钟超过阈值${config.proximityStopTimeInterval}分钟`)
-            }
+          if(timeInterval <= config.proximityStopTimeInterval){
             // 跳跃设置外循环索引
             i = j; // 从超过 proximityStopThreshold 米的停留点继续处理
             break; // 距离超过 proximityStopThreshold 米，结束内循环
