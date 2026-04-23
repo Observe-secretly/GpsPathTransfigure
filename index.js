@@ -55,24 +55,28 @@ var config={
     // ------------------------ 漂移观测（observeStopPointDirectionDrift）参数区 ------------------------
     // 这块是“角度漂移观测”的统一配置。你以后调参，优先改这里，不用进函数里找常量。
     driftObserveWindowSize:31,//窗口大小（滑动窗口）。越大越稳，越小越灵敏
-    driftObserveStartStreak:50,//进入区间前，需要连续命中高阈值的点数
+    driftObserveStartStreak:5,//进入区间前，需要连续命中高阈值的点数（原来过大容易一个区间都进不去）
     driftObserveEndStreak:5,//退出区间前，需要连续命中低阈值的点数
     driftObserveHighQuantile:0.65,//分位模式下的高阈值分位点
     driftObserveLowQuantile:0.35,//分位模式下的低阈值分位点（建议小于高阈值分位）
 
-    driftObserveBandRatioMin:0.15,//分布退化判据1：bandRatio 最小值
+    driftObserveBandRatioMin:0.35,//分布退化判据1：bandRatio 最小值
     driftObserveSpreadMin:0.35,//分布退化判据2：spread 最小值
     driftObserveAbsHighScore:1.2,//高分占比统计的绝对分数线
     driftObserveAbsMedianScoreMin:0.6,//高分门控：中位数最低要求
     driftObserveHighScoreRatioTrigger:0.4,//高分门控：高分占比最低要求
     driftObserveMinFallbackSampleSize:30,//最小样本保护：低于此值不切 fallback
 
-    driftObserveAbsAngleHigh:90,//fallback（固定角度模式）进入阈值
-    driftObserveAbsAngleLow:65,//fallback（固定角度模式）退出阈值（建议小于进入阈值）
+    driftObserveAbsAngleHigh:60,//fallback（固定角度模式）进入阈值（漂移抖动场景适当降低，避免“rawCount=0”）
+    driftObserveAbsAngleLow:35,//fallback（固定角度模式）退出阈值（保持滞回，避免频繁抖动开关）
 
-    driftObserveMergeDistanceThresholdMeters:10,//区间合并：中心点距离阈值（米）
+    driftObserveMergeDistanceThresholdMeters:55,//区间合并：中心点距离阈值（米）
     driftObserveMergeGapMaxMinutes:45,//区间合并：区间间隔阈值（分钟）
     driftObserveMinStopDurationMinutes:30,//区间保留：最短时长阈值（分钟）
+    driftObserveDensityEpsMeters:50,//DBSCAN密度半径（米）
+    driftObserveDensityMinPts:5,//DBSCAN最小核心点邻居数
+    driftObserveDensityMaxPoints:100,//DBSCAN性能保护：参与聚类的点数上限（超过就采样到最多100个点）
+    driftObserveDensityScoreThreshold:0.6,//二次判定阈值：densityScore低于此值就释放为普通点
 }
 
 
@@ -188,7 +192,8 @@ function createEmptyDriftObservationResult() {
  *  windowSize:number,startStreak:number,endStreak:number,highQuantile:number,lowQuantile:number,
  *  bandRatioMin:number,spreadMin:number,absHighScore:number,absMedianScoreMin:number,highScoreRatioTrigger:number,
  *  minFallbackSampleSize:number,absAngleHigh:number,absAngleLow:number,normalColor:string,
- *  mergeDistanceThresholdMeters:number,mergeGapMaxMinutes:number,minStopDurationMinutes:number
+ *  mergeDistanceThresholdMeters:number,mergeGapMaxMinutes:number,minStopDurationMinutes:number,
+ *  densityEpsMeters:number,densityMinPts:number,densityMaxPoints:number,densityScoreThreshold:number
  * }}
  */
 function resolveDriftObservationConfig() {
@@ -210,7 +215,11 @@ function resolveDriftObservationConfig() {
     normalColor: "#8a8f98",
     mergeDistanceThresholdMeters: config.driftObserveMergeDistanceThresholdMeters,
     mergeGapMaxMinutes: config.driftObserveMergeGapMaxMinutes,
-    minStopDurationMinutes: config.driftObserveMinStopDurationMinutes
+    minStopDurationMinutes: config.driftObserveMinStopDurationMinutes,
+    densityEpsMeters: config.driftObserveDensityEpsMeters,
+    densityMinPts: config.driftObserveDensityMinPts,
+    densityMaxPoints: config.driftObserveDensityMaxPoints,
+    densityScoreThreshold: config.driftObserveDensityScoreThreshold
   };
 }
 
@@ -329,7 +338,9 @@ function detectDriftIntervalsBySignal(
       }
       if (startCounter >= startStreak) {
         inInterval = true;
-        intervalStartIndex = i - startStreak + 1;
+        // 这里“进入区间”的连续命中点，只用来确认，不算进停留区间本体。
+        // 所以起点直接落在“连续命中窗口”之后的下一点。
+        intervalStartIndex = i + 1;
         startCounter = 0;
         endCounter = 0;
       }
@@ -340,15 +351,19 @@ function detectDriftIntervalsBySignal(
         endCounter = 0;
       }
       if (endCounter >= endStreak) {
-        const intervalEndIndex = i - endStreak + 1;
+        // 同理，“退出区间”的连续命中点只用来确认，不算进停留区间本体。
+        // 所以终点落在“连续命中窗口”之前的上一点。
+        const intervalEndIndex = i - endStreak;
         const displayColor = pickDistinctRandomColor(usedDriftColors);
         usedDriftColors.push(displayColor);
-        driftIntervals.push({
-          id: driftIntervals.length + 1,
-          startIndex: intervalStartIndex,
-          endIndex: Math.max(intervalStartIndex, intervalEndIndex),
-          color: displayColor
-        });
+        if (intervalStartIndex >= 0 && intervalStartIndex <= intervalEndIndex) {
+          driftIntervals.push({
+            id: driftIntervals.length + 1,
+            startIndex: intervalStartIndex,
+            endIndex: intervalEndIndex,
+            color: displayColor
+          });
+        }
         inInterval = false;
         intervalStartIndex = -1;
         endCounter = 0;
@@ -360,12 +375,15 @@ function detectDriftIntervalsBySignal(
   if (inInterval && intervalStartIndex >= 0) {
     const displayColor = pickDistinctRandomColor(usedDriftColors);
     usedDriftColors.push(displayColor);
-    driftIntervals.push({
-      id: driftIntervals.length + 1,
-      startIndex: intervalStartIndex,
-      endIndex: signalSeries.length - 1,
-      color: displayColor
-    });
+    // 这里没有触发“退出确认窗口”，所以不做 endStreak 的回退。
+    if (intervalStartIndex <= signalSeries.length - 1) {
+      driftIntervals.push({
+        id: driftIntervals.length + 1,
+        startIndex: intervalStartIndex,
+        endIndex: signalSeries.length - 1,
+        color: displayColor
+      });
+    }
   }
 
   return driftIntervals;
@@ -717,7 +735,31 @@ function observeStopPointDirectionDrift(gpsPoints) {
     }
   });
   const mergedDriftResult = buildMergedIntervals(driftIntervals);
-  const mergedDriftIntervals = mergedDriftResult.intervals;
+  const mergedDriftIntervalsRaw = mergedDriftResult.intervals;
+  // 二次判定：对每个停留区间做 DBSCAN 密度打分，低于阈值则释放为普通点。
+  const densityScoredMergedIntervals = mergedDriftIntervalsRaw.map((interval, index) => {
+    const gpsStartIndex = Math.max(0, Math.min(gpsPoints.length - 1, interval.startIndex));
+    const gpsEndIndex = Math.max(
+      gpsStartIndex,
+      Math.min(gpsPoints.length - 1, interval.endIndex + 2)
+    );
+    const stopSegmentPoints = gpsPoints.slice(gpsStartIndex, gpsEndIndex + 1);
+    const sampledPoints = samplePointsUniformly(stopSegmentPoints, driftConfig.densityMaxPoints);
+    const dbscanResult = runDbscan(sampledPoints, driftConfig.densityEpsMeters, driftConfig.densityMinPts);
+    const densityMetrics = buildDensityScore(sampledPoints, dbscanResult);
+    return {
+      intervalId: interval.id || index + 1,
+      interval,
+      pointCount: stopSegmentPoints.length,
+      sampledPointCount: sampledPoints.length,
+      densityMetrics,
+      keepAsStop: densityMetrics.densityScore >= driftConfig.densityScoreThreshold
+    };
+  });
+  const mergedDriftIntervals = densityScoredMergedIntervals
+    .filter(item => item.keepAsStop)
+    .map(item => item.interval);
+  const releasedMergedIntervalCount = densityScoredMergedIntervals.length - mergedDriftIntervals.length;
   const driftMergedColorByIndex = Array(turnAngleSeries.length).fill(driftConfig.normalColor);
   const driftMergedIntervalIdByIndex = Array(turnAngleSeries.length).fill(null);
   mergedDriftIntervals.forEach(interval => {
@@ -773,9 +815,30 @@ function observeStopPointDirectionDrift(gpsPoints) {
   console.log("角度漂移观测-规则区间后处理统计", {
     rawCount: mergedDriftResult.rawCount,
     mergedCount: mergedDriftResult.mergedCount,
-    durationFilteredCount: mergedDriftResult.durationFilteredCount
+    durationFilteredCount: mergedDriftResult.durationFilteredCount,
+    densityFilteredCount: mergedDriftIntervals.length,
+    releasedAsNormalCount: releasedMergedIntervalCount
   });
   console.log("角度漂移观测-规则合并过滤区间", mergedDriftIntervals);
+
+  // 基于“规则阈值合并+30分钟过滤后区间（主参考）”做 DBSCAN 密度观测与二次判定日志。
+  if (config.openDebug) {
+    densityScoredMergedIntervals.forEach(item => {
+      console.log("停留区间DBSCAN密度观测", {
+        intervalId: item.intervalId,
+        startTime: item.interval.startTime || null,
+        endTime: item.interval.endTime || null,
+        pointCount: item.pointCount,
+        sampledPointCount: item.sampledPointCount,
+        epsMeters: driftConfig.densityEpsMeters,
+        minPts: driftConfig.densityMinPts,
+        maxPoints: driftConfig.densityMaxPoints,
+        densityScoreThreshold: driftConfig.densityScoreThreshold,
+        keepAsStop: item.keepAsStop,
+        ...item.densityMetrics
+      });
+    });
+  }
 
   return {
     vectorAngleFromXAxisSeries,
@@ -799,9 +862,124 @@ function observeStopPointDirectionDrift(gpsPoints) {
       highScoreRatio,
       sufficientSamples,
       distributionDegraded,
-      highnessGate
+      highnessGate,
+      densityScoreThreshold: driftConfig.densityScoreThreshold,
+      densityFilteredCount: mergedDriftIntervals.length,
+      releasedAsNormalCount: releasedMergedIntervalCount
     }
   };
+}
+
+/**
+ * 用 DBSCAN（基于半径邻域）给一组点做聚类。
+ * 这是一个只用于“密度观测打分”的轻量实现，不会参与任何业务判定。
+ * @param {Array<{lat:number,lng:number}>} points 点集
+ * @param {number} epsMeters 邻域半径（米）
+ * @param {number} minPts 最小核心点邻居数
+ * @returns {{labels:number[],clusters:number[][],noiseIndices:number[]}}
+ */
+function runDbscan(points, epsMeters, minPts) {
+  const labels = Array(points.length).fill(undefined); // undefined: 未访问, -1: 噪声, >=0: clusterId
+  const visited = Array(points.length).fill(false);
+  const clusters = [];
+
+  const regionQuery = (index) => {
+    const neighbors = [];
+    for (let i = 0; i < points.length; i++) {
+      if (calculateDistance(points[index], points[i]) <= epsMeters) {
+        neighbors.push(i);
+      }
+    }
+    return neighbors;
+  };
+
+  const expandCluster = (seedIndex, seedNeighbors, clusterId) => {
+    clusters[clusterId] = [];
+    labels[seedIndex] = clusterId;
+    clusters[clusterId].push(seedIndex);
+    const queue = [...seedNeighbors];
+
+    while (queue.length) {
+      const current = queue.shift();
+      if (!visited[current]) {
+        visited[current] = true;
+        const currentNeighbors = regionQuery(current);
+        if (currentNeighbors.length >= minPts) {
+          queue.push(...currentNeighbors);
+        }
+      }
+      if (labels[current] === undefined || labels[current] === -1) {
+        labels[current] = clusterId;
+        clusters[clusterId].push(current);
+      }
+    }
+  };
+
+  for (let i = 0; i < points.length; i++) {
+    if (visited[i]) continue;
+    visited[i] = true;
+    const neighbors = regionQuery(i);
+    if (neighbors.length < minPts) {
+      labels[i] = -1;
+      continue;
+    }
+    const clusterId = clusters.length;
+    expandCluster(i, neighbors, clusterId);
+  }
+
+  const noiseIndices = labels
+    .map((label, index) => ({ label, index }))
+    .filter(item => item.label === -1)
+    .map(item => item.index);
+
+  return { labels, clusters, noiseIndices };
+}
+
+/**
+ * 把 DBSCAN 结果转成便于肉眼判断的密度指标。
+ * 这些指标只打印日志，不回写业务流程。
+ * @param {Array<{lat:number,lng:number}>} points
+ * @param {{clusters:number[][],noiseIndices:number[]}} dbscanResult
+ * @returns {{clusterCount:number,noiseCount:number,maxClusterSize:number,clusteredRatio:number,maxClusterRatio:number,densityScore:number}}
+ */
+function buildDensityScore(points, dbscanResult) {
+  const total = points.length || 1;
+  const clusterSizes = (dbscanResult.clusters || []).map(cluster => cluster.length);
+  const clusterCount = clusterSizes.length;
+  const maxClusterSize = clusterSizes.length ? Math.max(...clusterSizes) : 0;
+  const noiseCount = (dbscanResult.noiseIndices || []).length;
+  const clusteredRatio = (total - noiseCount) / total;
+  const maxClusterRatio = maxClusterSize / total;
+  const densityScore = Number((0.7 * maxClusterRatio + 0.3 * clusteredRatio).toFixed(6));
+  return {
+    clusterCount,
+    noiseCount,
+    maxClusterSize,
+    clusteredRatio: Number(clusteredRatio.toFixed(6)),
+    maxClusterRatio: Number(maxClusterRatio.toFixed(6)),
+    densityScore
+  };
+}
+
+/**
+ * DBSCAN 是 \(O(n^2)\) 的，点一多就很卡。
+ * 这里做一个“均匀抽样（uniform sampling）”的小工具：如果点数超过上限，就均匀取 maxPoints 个点。
+ * 这样能尽量保留时间/空间上的整体形状，又能把计算量压住。
+ * @param {Array<any>} points
+ * @param {number} maxPoints
+ * @returns {Array<any>}
+ */
+function samplePointsUniformly(points, maxPoints) {
+  if (!Array.isArray(points)) return [];
+  if (!Number.isFinite(maxPoints) || maxPoints <= 0) return points;
+  if (points.length <= maxPoints) return points;
+  const step = (points.length - 1) / (maxPoints - 1);
+  const sampled = [];
+  for (let i = 0; i < maxPoints; i++) {
+    const idx = Math.round(i * step);
+    sampled.push(points[idx]);
+  }
+  return sampled;
 }
 
 /**
@@ -818,13 +996,16 @@ async function innerOptimize(gpsPoints) {
   // 这里我们完全改用 observeStopPointDirectionDrift 的 mergedDriftIntervals 做停留主参考。
   // 注意索引映射：区间索引来自 turnAngleSeries，映射回 gpsPoints 时 endIndex 需要 +2。
   const normalizedDriftIntervals = (mergedDriftIntervals || [])
-    .map(interval => {
+    .map((interval, index) => {
       const gpsStartIndex = Math.max(0, Math.min(gpsPoints.length - 1, interval.startIndex));
       const gpsEndIndex = Math.max(
         gpsStartIndex,
         Math.min(gpsPoints.length - 1, interval.endIndex + 2)
       );
       return {
+        intervalId: interval.id || index + 1,
+        startTime: interval.startTime || null,
+        endTime: interval.endTime || null,
         gpsStartIndex,
         gpsEndIndex
       };
