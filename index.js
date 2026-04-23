@@ -1,8 +1,6 @@
 import {getI18nValue} from  "./lang/i18n"
 import  moment from "moment"
 
-//参数自动优化次数
-let autoOptimizeCount = 0
 
 //配置文件
 var config={
@@ -12,8 +10,8 @@ var config={
     stationaryEndPoints : 10, // 【删除】判断静止状态结束的连续点数（旧版静止识别使用）
     limitStopPointTime : 10,// 【删除】停留点时间阈值（旧版停留点二次加工使用）
     
-    autoOptimize : false, // 是否开启参数自动优化
-    autoOptimizeMaxCount : 10,//自动优化调整次数
+    autoOptimize : false, // 【删除】是否开启参数自动优化
+    autoOptimizeMaxCount : 10,// 【删除】自动优化调整次数
     
     abnormalPointRatio:0.05,//异常点占比阈值。若异常点占比超过此值，则会被认为是异常点识别功能失效或不适合此轨迹
     IQRThreshold:2.5,// 异常值检测阈值。此值通常要大于等于1.5
@@ -75,7 +73,8 @@ var config={
     driftObserveMinStopDurationMinutes:30,//区间保留：最短时长阈值（分钟）
     driftObserveDensityEpsMeters:50,//DBSCAN密度半径（米）
     driftObserveDensityMinPts:5,//DBSCAN最小核心点邻居数
-    driftObserveDensityMaxPoints:100,//DBSCAN性能保护：参与聚类的点数上限（超过就采样到最多100个点）
+    driftObserveDensitySampleTriggerCount:100,//DBSCAN性能保护：点数超过该值时触发采样
+    driftObserveDensityMaxPoints:200,//DBSCAN性能保护：参与聚类的点数上限（超过就采样到最多100个点）
     driftObserveDensityScoreThreshold:0.6,//二次判定阈值：densityScore低于此值就释放为普通点
 }
 
@@ -151,25 +150,6 @@ function noiseRecognitionFilter(points) {
 }
 
 /**
- * 寻找停留点
- * @param {*} gpsPoints 
- * @returns 
- */
-async function optimize(gpsPoints) {
-  //去除噪点 
-  let newGpsPoints = noiseRecognitionFilter(gpsPoints)
-  
-  if(config.autoOptimize){
-    //反复渲染轨迹时，为了确保自动优化每次都生效，需要重置自动优化次数
-    autoOptimizeCount = 0
-    //自动优化的配置项重置
-    config.distanceThreshold = 35
-  }
-  
-  return  innerOptimize(newGpsPoints)
-}
-
-/**
  * 统一返回一个“空的漂移观测结果”。
  * 这个小方法的目的很简单：避免在主流程里到处手写同样的空对象，后续字段扩展也只改这一处。
  * @returns {{vectorAngleFromXAxisSeries:Array,turnAngleSeries:Array,driftIntervals:Array,mergedDriftIntervals:Array,thresholdMeta:Object}}
@@ -193,7 +173,7 @@ function createEmptyDriftObservationResult() {
  *  bandRatioMin:number,spreadMin:number,absHighScore:number,absMedianScoreMin:number,highScoreRatioTrigger:number,
  *  minFallbackSampleSize:number,absAngleHigh:number,absAngleLow:number,normalColor:string,
  *  mergeDistanceThresholdMeters:number,mergeGapMaxMinutes:number,minStopDurationMinutes:number,
- *  densityEpsMeters:number,densityMinPts:number,densityMaxPoints:number,densityScoreThreshold:number
+ *  densityEpsMeters:number,densityMinPts:number,densitySampleTriggerCount:number,densityMaxPoints:number,densityScoreThreshold:number
  * }}
  */
 function resolveDriftObservationConfig() {
@@ -218,6 +198,7 @@ function resolveDriftObservationConfig() {
     minStopDurationMinutes: config.driftObserveMinStopDurationMinutes,
     densityEpsMeters: config.driftObserveDensityEpsMeters,
     densityMinPts: config.driftObserveDensityMinPts,
+    densitySampleTriggerCount: config.driftObserveDensitySampleTriggerCount,
     densityMaxPoints: config.driftObserveDensityMaxPoints,
     densityScoreThreshold: config.driftObserveDensityScoreThreshold
   };
@@ -744,7 +725,11 @@ function observeStopPointDirectionDrift(gpsPoints) {
       Math.min(gpsPoints.length - 1, interval.endIndex + 2)
     );
     const stopSegmentPoints = gpsPoints.slice(gpsStartIndex, gpsEndIndex + 1);
-    const sampledPoints = samplePointsUniformly(stopSegmentPoints, driftConfig.densityMaxPoints);
+    const sampledPoints = samplePointsUniformly(
+      stopSegmentPoints,
+      driftConfig.densitySampleTriggerCount,
+      driftConfig.densityMaxPoints
+    );
     const dbscanResult = runDbscan(sampledPoints, driftConfig.densityEpsMeters, driftConfig.densityMinPts);
     const densityMetrics = buildDensityScore(sampledPoints, dbscanResult);
     return {
@@ -832,6 +817,7 @@ function observeStopPointDirectionDrift(gpsPoints) {
         sampledPointCount: item.sampledPointCount,
         epsMeters: driftConfig.densityEpsMeters,
         minPts: driftConfig.densityMinPts,
+        sampleTriggerCount: driftConfig.densitySampleTriggerCount,
         maxPoints: driftConfig.densityMaxPoints,
         densityScoreThreshold: driftConfig.densityScoreThreshold,
         keepAsStop: item.keepAsStop,
@@ -966,13 +952,15 @@ function buildDensityScore(points, dbscanResult) {
  * 这里做一个“均匀抽样（uniform sampling）”的小工具：如果点数超过上限，就均匀取 maxPoints 个点。
  * 这样能尽量保留时间/空间上的整体形状，又能把计算量压住。
  * @param {Array<any>} points
+ * @param {number} sampleTriggerCount
  * @param {number} maxPoints
  * @returns {Array<any>}
  */
-function samplePointsUniformly(points, maxPoints) {
+function samplePointsUniformly(points, sampleTriggerCount, maxPoints) {
   if (!Array.isArray(points)) return [];
   if (!Number.isFinite(maxPoints) || maxPoints <= 0) return points;
-  if (points.length <= maxPoints) return points;
+  if (!Number.isFinite(sampleTriggerCount) || sampleTriggerCount <= 0) return points;
+  if (points.length <= sampleTriggerCount) return points;
   const step = (points.length - 1) / (maxPoints - 1);
   const sampled = [];
   for (let i = 0; i < maxPoints; i++) {
@@ -987,7 +975,11 @@ function samplePointsUniformly(points, maxPoints) {
  * @param {*} gpsPoints 
  * @returns 
  */
-async function innerOptimize(gpsPoints) {
+async function optimize(riginalGpsPoints) {
+
+  //去除噪点 
+  let gpsPoints = noiseRecognitionFilter(riginalGpsPoints)
+
   const {turnAngleSeries, mergedDriftIntervals} = observeStopPointDirectionDrift(gpsPoints)
 
   // 第一阶段：----------------------------------------------寻找停留点
@@ -1043,21 +1035,6 @@ async function innerOptimize(gpsPoints) {
   //把停留点从坐标中单独提出来
   let stopPoints = []
   stopPoints = dismantleStopPoint(finalPoints)
-
-  if(config.autoOptimize){
-    if(autoAdjustThreshold(stopPoints) && autoOptimizeCount < config.autoOptimizeMaxCount){
-      autoOptimizeCount+=1
-  
-      config.distanceThreshold= config.distanceThreshold+5
-  
-      if(config.openDebug){
-        console.log(`第${autoOptimizeCount}次优化`)
-        console.log(config.distanceThreshold,'距离阈值')
-      }
-  
-      return innerOptimize(gpsPoints)
-    }
-  }
 
   //计算速度和里程
   let totalMileage = await calculateSpeedAndMileage(finalPoints)
