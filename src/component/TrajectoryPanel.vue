@@ -130,10 +130,6 @@ function emitCollapsed(nextCollapsed) {
   gap: 8px;
 }
 
-.side-panel.collapsed .panel-title {
-  display: none;
-}
-
 .side-panel.collapsed .panel-actions {
   gap: 6px;
 }

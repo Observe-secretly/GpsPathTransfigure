@@ -61,18 +61,22 @@
   
   // 设置画布尺寸和绘制图表
   const updateCanvasSizeAndRender = () => {
-    if (chartContainer.value && canvas.value) {
-      canvas.value.width = chartContainer.value.offsetWidth;
-      canvas.value.height = chartContainer.value.offsetHeight;
-      drawLineChart();
-      updateSliderPosition(slider.value.offsetLeft);
-      drawStopLines();
+    if (!chartContainer.value || !canvas.value || !slider.value || !ctx.value) {
+      return;
     }
+    if (!props.data.length) {
+      return;
+    }
+    canvas.value.width = chartContainer.value.offsetWidth;
+    canvas.value.height = chartContainer.value.offsetHeight;
+    drawLineChart();
+    updateSliderPosition(slider.value.offsetLeft);
+    drawStopLines();
   };
   
   // 绘制折线图
   const drawLineChart = () => {
-    if (ctx.value) {
+    if (ctx.value && props.data.length >= 2) {
       ctx.value.clearRect(0, 0, ctx.value.canvas.width, ctx.value.canvas.height);
   
       // 计算比例
@@ -122,12 +126,18 @@
   
   // 计算每个数据点的 x 位置
   const calculateDataPoints = () => {
+    if (!chartContainer.value || props.data.length < 2) {
+      return [];
+    }
     const containerWidth = chartContainer.value.offsetWidth;
     return props.data.map((_, index) => (containerWidth / (props.data.length - 1)) * index);
   };
   
   // 绘制停留点
   const drawStopLines = () => {
+    if (!chartContainer.value || props.data.length < 2) {
+      return;
+    }
     const existingLines = document.querySelectorAll('.stop-line');
     existingLines.forEach(line => line.remove());
   
@@ -157,7 +167,13 @@
   
   // 更新滑块位置
   const updateSliderPosition = (x) => {
+    if (!chartContainer.value || !slider.value) {
+      return;
+    }
     const dataPoints = calculateDataPoints();
+    if (!dataPoints.length) {
+      return;
+    }
     let closestX = dataPoints[0];
     let minDist = Math.abs(x - dataPoints[0]);
   
@@ -182,7 +198,7 @@
   };
   
   const drag = (e) => {
-    if (isDragging) {
+    if (isDragging && chartContainer.value && slider.value) {
         let rect = chartContainer.value.getBoundingClientRect();
         let x = e.clientX - rect.left;
         x = Math.max(0, Math.min(x, chartContainer.value.offsetWidth - slider.value.offsetWidth));
@@ -199,6 +215,9 @@
     
     // 点击进度条时移动滑块
     const moveSliderOnClick = (e) => {
+      if (!chartContainer.value || !slider.value) {
+        return;
+      }
       let rect = chartContainer.value.getBoundingClientRect();
       let x = e.clientX - rect.left;
       x = Math.max(0, Math.min(x, chartContainer.value.offsetWidth - slider.value.offsetWidth));
@@ -211,9 +230,12 @@
   
     // 拖动滑块时的回调函数
     const onSliderMove = (callback) => {
-        if (typeof callback === 'function') {
+        if (typeof callback === 'function' && slider.value) {
             // 获取滑块对应的下标
             const dataPoints = calculateDataPoints();
+            if (!dataPoints.length) {
+              return;
+            }
             const sliderLeft = slider.value.offsetLeft;
             const closestIndex = dataPoints.reduce((closest, pointX, index) => {
               const dist = Math.abs(sliderLeft - pointX);
@@ -278,34 +300,44 @@
 
     // 监听 props.data 的变化
     watch(() => props.data, (newData) => {
-        if (newData.length) {
+        if (newData.length && chartContainer.value && canvas.value && slider.value && ctx.value) {
             updateCanvasSizeAndRender();
         }
     }, { immediate: true });
   
   onMounted(() => {
-    canvas.value = document.getElementById('speed-chart');
+    if (!chartContainer.value) {
+      return;
+    }
+    canvas.value = chartContainer.value.querySelector('#speed-chart');
+    slider.value = chartContainer.value.querySelector('#slider');
+    if (!canvas.value || !slider.value) {
+      return;
+    }
     ctx.value = canvas.value.getContext('2d');
-    slider.value = document.getElementById('slider');
-  
+
     window.addEventListener('resize', updateCanvasSizeAndRender);
     slider.value.addEventListener('mousedown', startDragging);
     document.addEventListener('mousemove', drag);
     document.addEventListener('mouseup', stopDragging);
     chartContainer.value.addEventListener('mousedown', moveSliderOnClick);
-  
+
     // 如果数据在挂载时已经准备好，则立即更新
     if (props.data.length) {
       updateCanvasSizeAndRender();
     }
   });
-  
+
   onUnmounted(() => {
     window.removeEventListener('resize', updateCanvasSizeAndRender);
-    slider.value.removeEventListener('mousedown', startDragging);
+    if (slider.value) {
+      slider.value.removeEventListener('mousedown', startDragging);
+    }
     document.removeEventListener('mousemove', drag);
     document.removeEventListener('mouseup', stopDragging);
-    chartContainer.value.removeEventListener('mousedown', moveSliderOnClick);
+    if (chartContainer.value) {
+      chartContainer.value.removeEventListener('mousedown', moveSliderOnClick);
+    }
   });
   </script>
   

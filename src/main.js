@@ -1,7 +1,5 @@
 import { createApp } from 'vue'
-import Amap from './Amap.vue'
-import Gmap from './Gmap.vue'
+import App from './App.vue'
 import "/index"
 
-createApp(Amap).mount('#amap')
-createApp(Gmap).mount('#gmap')
+createApp(App).mount('#app')

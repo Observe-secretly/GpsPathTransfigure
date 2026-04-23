@@ -6,11 +6,11 @@ let autoOptimizeCount = 0
 
 //配置文件
 var config={
-    minComparisonPoints : 10, // 最少比较的点数
-    distanceThresholdPercentage : 70, // 距离阈值内的点的百分比
+    minComparisonPoints : 10, // 【删除】最少比较的点数（旧版静止识别使用，现已切换为规则区间驱动）
+    distanceThresholdPercentage : 70, // 【删除】距离阈值内的点的百分比（旧版静止识别使用）
     distanceThreshold : 35, // 距离阈值，单位为米
-    stationaryEndPoints : 10, // 判断静止状态结束的连续点数
-    limitStopPointTime : 10,//停留点时间阈值。单位分钟。如果被识别是停留点，但是时间小于此值，则会被认为是运动点。若未识别为停留点，时间超过此值，则会被认为是停留点。
+    stationaryEndPoints : 10, // 【删除】判断静止状态结束的连续点数（旧版静止识别使用）
+    limitStopPointTime : 10,// 【删除】停留点时间阈值（旧版停留点二次加工使用）
     
     autoOptimize : false, // 是否开启参数自动优化
     autoOptimizeMaxCount : 10,//自动优化调整次数
@@ -24,7 +24,7 @@ var config={
 
     proximityStopThreshold:45,// 近距离停留点距离阈值。此值通常要大于等于distanceThreshold
     proximityStopTimeInterval:60,//近距离停留点时间间隔阈值。单位分钟
-    proximityStopMerge:true,// 近距离停留点合并。建议默认开启
+    proximityStopMerge:true,// 近距离停留点合并。建议默认开启【删除】
     
     smoothness:false,//是否开启停留点前后点位的轨迹补偿。你必须配置对应的地图密钥。否则无效。开启此项会额外消耗移动端流量，并且轨迹渲染速度也会降低
     smoothnessAvgThreshold:1.6,//轨迹补偿距离倍数阈值。点之间的距离超过平均值的这个倍数后，才会被捕捉到进行轨迹补偿
@@ -51,6 +51,28 @@ var config={
 
     useUniApp:false,//此处如果为true，则代表使用uniapp环境，一些网络请求会以uniapp的方式进行调用
     openDebug:false,//开启调试后打印调试信息
+
+    // ------------------------ 漂移观测（observeStopPointDirectionDrift）参数区 ------------------------
+    // 这块是“角度漂移观测”的统一配置。你以后调参，优先改这里，不用进函数里找常量。
+    driftObserveWindowSize:31,//窗口大小（滑动窗口）。越大越稳，越小越灵敏
+    driftObserveStartStreak:50,//进入区间前，需要连续命中高阈值的点数
+    driftObserveEndStreak:5,//退出区间前，需要连续命中低阈值的点数
+    driftObserveHighQuantile:0.65,//分位模式下的高阈值分位点
+    driftObserveLowQuantile:0.35,//分位模式下的低阈值分位点（建议小于高阈值分位）
+
+    driftObserveBandRatioMin:0.15,//分布退化判据1：bandRatio 最小值
+    driftObserveSpreadMin:0.35,//分布退化判据2：spread 最小值
+    driftObserveAbsHighScore:1.2,//高分占比统计的绝对分数线
+    driftObserveAbsMedianScoreMin:0.6,//高分门控：中位数最低要求
+    driftObserveHighScoreRatioTrigger:0.4,//高分门控：高分占比最低要求
+    driftObserveMinFallbackSampleSize:30,//最小样本保护：低于此值不切 fallback
+
+    driftObserveAbsAngleHigh:90,//fallback（固定角度模式）进入阈值
+    driftObserveAbsAngleLow:65,//fallback（固定角度模式）退出阈值（建议小于进入阈值）
+
+    driftObserveMergeDistanceThresholdMeters:10,//区间合并：中心点距离阈值（米）
+    driftObserveMergeGapMaxMinutes:45,//区间合并：区间间隔阈值（分钟）
+    driftObserveMinStopDurationMinutes:30,//区间保留：最短时长阈值（分钟）
 }
 
 
@@ -138,10 +160,648 @@ async function optimize(gpsPoints) {
     autoOptimizeCount = 0
     //自动优化的配置项重置
     config.distanceThreshold = 35
-    config.stationaryEndPoints = 10
   }
   
   return  innerOptimize(newGpsPoints)
+}
+
+/**
+ * 统一返回一个“空的漂移观测结果”。
+ * 这个小方法的目的很简单：避免在主流程里到处手写同样的空对象，后续字段扩展也只改这一处。
+ * @returns {{vectorAngleFromXAxisSeries:Array,turnAngleSeries:Array,driftIntervals:Array,mergedDriftIntervals:Array,thresholdMeta:Object}}
+ */
+function createEmptyDriftObservationResult() {
+  // 这里刻意把结构写完整，调用方拿到后不需要再判空字段。
+  return {
+    vectorAngleFromXAxisSeries: [],
+    turnAngleSeries: [],
+    driftIntervals: [],
+    mergedDriftIntervals: [],
+    thresholdMeta: {}
+  };
+}
+
+/**
+ * 把全局 config 里的漂移观测参数整理成“运行期配置”。
+ * 你可以把这个方法理解成一个“参数适配层”：主流程只读这里，不直接散读 config。
+ * @returns {{
+ *  windowSize:number,startStreak:number,endStreak:number,highQuantile:number,lowQuantile:number,
+ *  bandRatioMin:number,spreadMin:number,absHighScore:number,absMedianScoreMin:number,highScoreRatioTrigger:number,
+ *  minFallbackSampleSize:number,absAngleHigh:number,absAngleLow:number,normalColor:string,
+ *  mergeDistanceThresholdMeters:number,mergeGapMaxMinutes:number,minStopDurationMinutes:number
+ * }}
+ */
+function resolveDriftObservationConfig() {
+  // 在这里做一次参数集中映射，方便后续做默认值兜底、范围裁剪等扩展。
+  return {
+    windowSize: config.driftObserveWindowSize,
+    startStreak: config.driftObserveStartStreak,
+    endStreak: config.driftObserveEndStreak,
+    highQuantile: config.driftObserveHighQuantile,
+    lowQuantile: config.driftObserveLowQuantile,
+    bandRatioMin: config.driftObserveBandRatioMin,
+    spreadMin: config.driftObserveSpreadMin,
+    absHighScore: config.driftObserveAbsHighScore,
+    absMedianScoreMin: config.driftObserveAbsMedianScoreMin,
+    highScoreRatioTrigger: config.driftObserveHighScoreRatioTrigger,
+    minFallbackSampleSize: config.driftObserveMinFallbackSampleSize,
+    absAngleHigh: config.driftObserveAbsAngleHigh,
+    absAngleLow: config.driftObserveAbsAngleLow,
+    normalColor: "#8a8f98",
+    mergeDistanceThresholdMeters: config.driftObserveMergeDistanceThresholdMeters,
+    mergeGapMaxMinutes: config.driftObserveMergeGapMaxMinutes,
+    minStopDurationMinutes: config.driftObserveMinStopDurationMinutes
+  };
+}
+
+/**
+ * 根据 driftScore 序列 + 转角序列，计算“当前应该走哪种阈值策略”。
+ * 这个方法是混合阈值的核心：分位模式（quantile）还是固定角度 fallback，由这里统一决策。
+ * @param {number[]} driftScoreSeries
+ * @param {Array} turnAngleSeries
+ * @param {ReturnType<typeof resolveDriftObservationConfig>} driftConfig
+ * @param {(values:number[], quantile:number)=>number} percentile
+ * @returns {{
+ *  quantileHighThreshold:number,quantileLowThreshold:number,p10:number,p50:number,p90:number,
+ *  spread:number,band:number,bandRatio:number,highScoreRatio:number,sufficientSamples:boolean,
+ *  distributionDegraded:boolean,highnessGate:boolean,useFallback:boolean,thresholdMode:string,
+ *  highThreshold:number,lowThreshold:number,fallbackReason:string[],fallbackSignalSeries:number[]
+ * }}
+ */
+function buildDriftThresholdMeta(driftScoreSeries, turnAngleSeries, driftConfig, percentile) {
+  // 先算分位阈值（这是默认模式）
+  const quantileHighThreshold = percentile(driftScoreSeries, driftConfig.highQuantile);
+  const quantileLowThreshold = percentile(driftScoreSeries, driftConfig.lowQuantile);
+
+  // 再算退化识别统计量（判断分位阈值是不是“失真”）
+  const p10 = percentile(driftScoreSeries, 0.1);
+  const p50 = percentile(driftScoreSeries, 0.5);
+  const p90 = percentile(driftScoreSeries, 0.9);
+  const spread = p90 - p10;
+  const band = quantileHighThreshold - quantileLowThreshold;
+  const bandRatio = band / Math.max(spread, 1e-6);
+
+  // 高分占比：用外生绝对分数线，避免“分位阈值循环依赖”
+  const highScoreCount = driftScoreSeries.reduce((count, score) => (
+    score >= driftConfig.absHighScore ? count + 1 : count
+  ), 0);
+  const highScoreRatio = driftScoreSeries.length ? highScoreCount / driftScoreSeries.length : 0;
+
+  // 自动切换开关：样本够 + 分布退化 + 高分门控
+  const sufficientSamples = driftScoreSeries.length >= driftConfig.minFallbackSampleSize;
+  const distributionDegraded = spread < driftConfig.spreadMin || bandRatio < driftConfig.bandRatioMin;
+  const highnessGate = p50 >= driftConfig.absMedianScoreMin || highScoreRatio >= driftConfig.highScoreRatioTrigger;
+  const useFallback = sufficientSamples && distributionDegraded && highnessGate;
+
+  // fallback 模式下，信号从 driftScore 换成 |turnAngle|，阈值改为固定角度滞回
+  const fallbackSignalSeries = turnAngleSeries.map(item => {
+    const angleAbs = Math.abs(Number(item.turnAngle));
+    return Number.isFinite(angleAbs) ? angleAbs : 0;
+  });
+  const thresholdMode = useFallback ? "fixed_angle_fallback" : "quantile_score";
+  const highThreshold = useFallback ? driftConfig.absAngleHigh : quantileHighThreshold;
+  const lowThreshold = useFallback ? driftConfig.absAngleLow : quantileLowThreshold;
+
+  const fallbackReason = [];
+  if (useFallback) {
+    if (spread < driftConfig.spreadMin) fallbackReason.push("spread_too_small");
+    if (bandRatio < driftConfig.bandRatioMin) fallbackReason.push("band_ratio_too_small");
+    if (p50 >= driftConfig.absMedianScoreMin) fallbackReason.push("median_score_high");
+    if (highScoreRatio >= driftConfig.highScoreRatioTrigger) fallbackReason.push("high_score_ratio_high");
+  }
+
+  return {
+    quantileHighThreshold,
+    quantileLowThreshold,
+    p10,
+    p50,
+    p90,
+    spread,
+    band,
+    bandRatio,
+    highScoreRatio,
+    sufficientSamples,
+    distributionDegraded,
+    highnessGate,
+    useFallback,
+    thresholdMode,
+    highThreshold,
+    lowThreshold,
+    fallbackReason,
+    fallbackSignalSeries
+  };
+}
+
+/**
+ * 用“统一信号 + 上下阈值 + 连续命中点数”去切漂移区间。
+ * 你可以把它看成一个小状态机：没进区间时看 high，进了区间后看 low。
+ * @param {number[]} signalSeries
+ * @param {number} highThreshold
+ * @param {number} lowThreshold
+ * @param {number} startStreak
+ * @param {number} endStreak
+ * @param {(usedColors:string[])=>string} pickDistinctRandomColor
+ * @returns {Array<{id:number,startIndex:number,endIndex:number,color:string}>}
+ */
+function detectDriftIntervalsBySignal(
+  signalSeries,
+  highThreshold,
+  lowThreshold,
+  startStreak,
+  endStreak,
+  pickDistinctRandomColor
+) {
+  const driftIntervals = [];
+  const usedDriftColors = [];
+  let inInterval = false;
+  let startCounter = 0;
+  let endCounter = 0;
+  let intervalStartIndex = -1;
+
+  // 这里逐点扫描，进入和退出分别走不同计数器，避免阈值边缘抖动。
+  for (let i = 0; i < signalSeries.length; i++) {
+    const score = signalSeries[i];
+    if (!inInterval) {
+      if (score >= highThreshold) {
+        startCounter++;
+      } else {
+        startCounter = 0;
+      }
+      if (startCounter >= startStreak) {
+        inInterval = true;
+        intervalStartIndex = i - startStreak + 1;
+        startCounter = 0;
+        endCounter = 0;
+      }
+    } else {
+      if (score <= lowThreshold) {
+        endCounter++;
+      } else {
+        endCounter = 0;
+      }
+      if (endCounter >= endStreak) {
+        const intervalEndIndex = i - endStreak + 1;
+        const displayColor = pickDistinctRandomColor(usedDriftColors);
+        usedDriftColors.push(displayColor);
+        driftIntervals.push({
+          id: driftIntervals.length + 1,
+          startIndex: intervalStartIndex,
+          endIndex: Math.max(intervalStartIndex, intervalEndIndex),
+          color: displayColor
+        });
+        inInterval = false;
+        intervalStartIndex = -1;
+        endCounter = 0;
+      }
+    }
+  }
+
+  // 如果扫完整段还在区间内，补一个“收尾区间”。
+  if (inInterval && intervalStartIndex >= 0) {
+    const displayColor = pickDistinctRandomColor(usedDriftColors);
+    usedDriftColors.push(displayColor);
+    driftIntervals.push({
+      id: driftIntervals.length + 1,
+      startIndex: intervalStartIndex,
+      endIndex: signalSeries.length - 1,
+      color: displayColor
+    });
+  }
+
+  return driftIntervals;
+}
+
+/**
+ * 观测轨迹里的“方向漂移”信号，主要用于调试和参数验证，不直接改动主业务输出。
+ * 你可以把这个方法看成一个“诊断面板生成器”：输入原始 gps 点，输出转角序列、候选区间和阈值元信息。
+ * 注意：这个方法的入参/出参是稳定接口，内部即使重构也不应该改外部调用方式。
+ * @param {Array<{lat:number,lng:number,currentTime:string}>} gpsPoints GPS 轨迹点数组
+ * @returns {{vectorAngleFromXAxisSeries:Array,turnAngleSeries:Array,driftIntervals:Array,mergedDriftIntervals:Array,thresholdMeta?:Object}}
+ */
+function observeStopPointDirectionDrift(gpsPoints) {
+  // 第0步：先做最基础的输入保护，避免后面向量计算越界。
+  if (!Array.isArray(gpsPoints) || gpsPoints.length < 3) {
+    console.log("角度漂移观测：点位不足3个，无法计算连续向量角度。");
+    return createEmptyDriftObservationResult();
+  }
+
+  // 第1步：把全局配置收口到一个局部对象，后面统一从 driftConfig 读取参数。
+  const driftConfig = resolveDriftObservationConfig();
+
+  const roundAngle = (angle) => Number(angle.toFixed(6));
+  const normalizeAngle = (angle) => {
+    const normalized = ((angle + 180) % 360 + 360) % 360 - 180;
+    return roundAngle(normalized);
+  };
+
+  const buildVector = (startPoint, endPoint) => ({
+    x: endPoint.lng - startPoint.lng,
+    y: endPoint.lat - startPoint.lat
+  });
+
+  const isZeroVector = (vector) => vector.x === 0 && vector.y === 0;
+
+  const calculateVectorAngleFromXAxis = (vector) => {
+    if (isZeroVector(vector)) {
+      return null;
+    }
+    return roundAngle((Math.atan2(vector.y, vector.x) * 180) / Math.PI);
+  };
+
+  const calculateTurnAngle = (firstVector, secondVector) => {
+    if (isZeroVector(firstVector) || isZeroVector(secondVector)) {
+      return null;
+    }
+    const firstAngle = (Math.atan2(firstVector.y, firstVector.x) * 180) / Math.PI;
+    const secondAngle = (Math.atan2(secondVector.y, secondVector.x) * 180) / Math.PI;
+    return normalizeAngle(secondAngle - firstAngle);
+  };
+
+  const vectorAngleFromXAxisSeries = [];
+  for (let i = 0; i < gpsPoints.length - 1; i++) {
+    const currentVector = buildVector(gpsPoints[i], gpsPoints[i + 1]);
+    vectorAngleFromXAxisSeries.push({
+      fromIndex: i,
+      toIndex: i + 1,
+      fromTime: gpsPoints[i].currentTime,
+      toTime: gpsPoints[i + 1].currentTime,
+      vectorAngleFromXAxis: calculateVectorAngleFromXAxis(currentVector)
+    });
+  }
+
+  const turnAngleSeries = [];
+  for (let i = 0; i < gpsPoints.length - 2; i++) {
+    const firstVector = buildVector(gpsPoints[i], gpsPoints[i + 1]);
+    const secondVector = buildVector(gpsPoints[i + 1], gpsPoints[i + 2]);
+    turnAngleSeries.push({
+      index: i,
+      firstVector: `${i}->${i + 1}`,
+      secondVector: `${i + 1}->${i + 2}`,
+      fromTime: gpsPoints[i].currentTime,
+      middleTime: gpsPoints[i + 1].currentTime,
+      toTime: gpsPoints[i + 2].currentTime,
+      currentTime: gpsPoints[i + 1].currentTime,
+      firstVectorAngleFromXAxis: vectorAngleFromXAxisSeries[i].vectorAngleFromXAxis,
+      secondVectorAngleFromXAxis: vectorAngleFromXAxisSeries[i + 1].vectorAngleFromXAxis,
+      turnAngle: calculateTurnAngle(firstVector, secondVector)
+    });
+  }
+
+  const extractValidNumbers = (values) => values.filter(value => Number.isFinite(value));
+  const percentile = (values, quantile) => {
+    const validValues = extractValidNumbers(values).sort((a, b) => a - b);
+    if (!validValues.length) return 0;
+    const rank = Math.min(validValues.length - 1, Math.max(0, (validValues.length - 1) * quantile));
+    const low = Math.floor(rank);
+    const high = Math.ceil(rank);
+    if (low === high) return validValues[low];
+    const ratio = rank - low;
+    return validValues[low] * (1 - ratio) + validValues[high] * ratio;
+  };
+  const median = (values) => percentile(values, 0.5);
+  const calculateMad = (values) => {
+    const validValues = extractValidNumbers(values);
+    if (!validValues.length) return 0;
+    const med = median(validValues);
+    const deviations = validValues.map(value => Math.abs(value - med));
+    return median(deviations);
+  };
+  const zScoreSeries = (values) => {
+    const validValues = extractValidNumbers(values);
+    if (!validValues.length) {
+      return values.map(() => 0);
+    }
+    const mean = validValues.reduce((sum, value) => sum + value, 0) / validValues.length;
+    const variance = validValues.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / validValues.length;
+    const std = Math.sqrt(variance);
+    if (!std) {
+      return values.map(() => 0);
+    }
+    return values.map(value => Number.isFinite(value) ? (value - mean) / std : 0);
+  };
+  const getWindowRange = (index, length, windowSize) => {
+    const half = Math.floor(windowSize / 2);
+    return {
+      start: Math.max(0, index - half),
+      end: Math.min(length - 1, index + half)
+    };
+  };
+  const calculateFlipRate = (windowValues) => {
+    const validValues = extractValidNumbers(windowValues).filter(value => value !== 0);
+    if (validValues.length < 2) return 0;
+    let flips = 0;
+    for (let i = 1; i < validValues.length; i++) {
+      if (Math.sign(validValues[i]) !== Math.sign(validValues[i - 1])) {
+        flips++;
+      }
+    }
+    return flips / (validValues.length - 1);
+  };
+  const calculateCoherence = (windowValues) => {
+    const validValues = extractValidNumbers(windowValues);
+    if (!validValues.length) return 0;
+    const signedSum = Math.abs(validValues.reduce((sum, value) => sum + value, 0));
+    const absSum = validValues.reduce((sum, value) => sum + Math.abs(value), 0);
+    if (!absSum) return 0;
+    return signedSum / absSum;
+  };
+  const pickDistinctRandomColor = (usedColors) => {
+    const hueFromColor = (color) => Number(color.match(/hsl\((\d+)/)?.[1] || 0);
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const hue = Math.floor(Math.random() * 360);
+      const conflict = usedColors.some(color => {
+        const usedHue = hueFromColor(color);
+        const distance = Math.min(Math.abs(hue - usedHue), 360 - Math.abs(hue - usedHue));
+        return distance < 35;
+      });
+      if (!conflict) {
+        return `hsl(${hue}, 78%, 46%)`;
+      }
+    }
+    const fallbackHue = (usedColors.length * 67) % 360;
+    return `hsl(${fallbackHue}, 78%, 46%)`;
+  };
+  const normalizeIntervalRanges = (intervals, maxIndex) => {
+    return (intervals || [])
+      .map(interval => ({
+        startIndex: Math.max(0, Math.min(maxIndex, interval.startIndex)),
+        endIndex: Math.max(0, Math.min(maxIndex, interval.endIndex))
+      }))
+      .filter(interval => interval.endIndex >= interval.startIndex)
+      .sort((a, b) => a.startIndex - b.startIndex);
+  };
+  const buildIntervalSnapshot = (range) => {
+    if (!range) return null;
+    const start = Math.max(0, Math.min(turnAngleSeries.length - 1, range.startIndex));
+    const end = Math.max(0, Math.min(turnAngleSeries.length - 1, range.endIndex));
+    if (end < start) return null;
+    const startItem = turnAngleSeries[start];
+    const endItem = turnAngleSeries[end];
+    const startTime = startItem?.fromTime || startItem?.currentTime;
+    const endTime = endItem?.toTime || endItem?.currentTime;
+    const gpsStart = Math.max(0, start);
+    const gpsEnd = Math.min(gpsPoints.length - 1, end + 2);
+    let latSum = 0;
+    let lngSum = 0;
+    let count = 0;
+    for (let i = gpsStart; i <= gpsEnd; i++) {
+      latSum += gpsPoints[i].lat;
+      lngSum += gpsPoints[i].lng;
+      count++;
+    }
+    const durationMs = startTime && endTime ? calculateMilliseconds(startTime, endTime) : 0;
+    return {
+      startIndex: start,
+      endIndex: end,
+      startTime,
+      endTime,
+      durationMs,
+      centerLat: count ? latSum / count : 0,
+      centerLng: count ? lngSum / count : 0
+    };
+  };
+  const canMergeIntervals = (leftRange, rightRange) => {
+    const leftSnapshot = buildIntervalSnapshot(leftRange);
+    const rightSnapshot = buildIntervalSnapshot(rightRange);
+    if (!leftSnapshot || !rightSnapshot) return false;
+    const distance = calculateDistance(
+      { lat: leftSnapshot.centerLat, lng: leftSnapshot.centerLng },
+      { lat: rightSnapshot.centerLat, lng: rightSnapshot.centerLng }
+    );
+    const gapMinutes = leftSnapshot.endTime && rightSnapshot.startTime
+      ? calculateMilliseconds(leftSnapshot.endTime, rightSnapshot.startTime) / (1000 * 60)
+      : Number.POSITIVE_INFINITY;
+    return distance <= driftConfig.mergeDistanceThresholdMeters && gapMinutes <= driftConfig.mergeGapMaxMinutes;
+  };
+  const mergeIntervalRanges = (ranges) => {
+    if (!ranges.length) return [];
+    let currentRanges = [...ranges];
+    let changed = true;
+    while (changed) {
+      changed = false;
+      const nextRanges = [];
+      let current = currentRanges[0];
+      for (let i = 1; i < currentRanges.length; i++) {
+        const candidate = currentRanges[i];
+        if (canMergeIntervals(current, candidate)) {
+          current = {
+            startIndex: Math.min(current.startIndex, candidate.startIndex),
+            endIndex: Math.max(current.endIndex, candidate.endIndex)
+          };
+          changed = true;
+        } else {
+          nextRanges.push(current);
+          current = candidate;
+        }
+      }
+      nextRanges.push(current);
+      currentRanges = nextRanges;
+    }
+    return currentRanges;
+  };
+  const filterIntervalsByDuration = (ranges) => {
+    const minDurationMs = driftConfig.minStopDurationMinutes * 60 * 1000;
+    return ranges.filter(range => {
+      const snapshot = buildIntervalSnapshot(range);
+      return snapshot && snapshot.durationMs >= minDurationMs;
+    });
+  };
+  const toColoredIntervals = (ranges) => {
+    const usedColors = [];
+    return ranges.map((range, index) => {
+      const snapshot = buildIntervalSnapshot(range);
+      const color = pickDistinctRandomColor(usedColors);
+      usedColors.push(color);
+      return {
+        id: index + 1,
+        startIndex: range.startIndex,
+        endIndex: range.endIndex,
+        color,
+        startTime: snapshot?.startTime || null,
+        endTime: snapshot?.endTime || null,
+        durationMs: snapshot?.durationMs || 0,
+        center: {
+          lat: snapshot?.centerLat || 0,
+          lng: snapshot?.centerLng || 0
+        }
+      };
+    });
+  };
+  const buildMergedIntervals = (rawIntervals) => {
+    const normalizedRanges = normalizeIntervalRanges(rawIntervals, turnAngleSeries.length - 1);
+    const mergedRanges = mergeIntervalRanges(normalizedRanges);
+    const durationFilteredRanges = filterIntervalsByDuration(mergedRanges);
+    return {
+      rawCount: normalizedRanges.length,
+      mergedCount: mergedRanges.length,
+      durationFilteredCount: durationFilteredRanges.length,
+      intervals: toColoredIntervals(durationFilteredRanges)
+    };
+  };
+
+  const turnAngles = turnAngleSeries.map(item => item.turnAngle);
+  const featureSeries = turnAngles.map((_, index) => {
+    const { start, end } = getWindowRange(index, turnAngles.length, driftConfig.windowSize);
+    const windowValues = turnAngles.slice(start, end + 1);
+    const validValues = extractValidNumbers(windowValues);
+    if (validValues.length < 3) {
+      return {
+        amp: 0,
+        mad: 0,
+        flipRate: 0,
+        coherence: 0
+      };
+    }
+    const absValues = validValues.map(value => Math.abs(value));
+    return {
+      amp: median(absValues),
+      mad: calculateMad(validValues),
+      flipRate: calculateFlipRate(validValues),
+      coherence: calculateCoherence(validValues)
+    };
+  });
+  const ampSeries = featureSeries.map(item => item.amp);
+  const madSeries = featureSeries.map(item => item.mad);
+  const flipRateSeries = featureSeries.map(item => item.flipRate);
+  const zAmpSeries = zScoreSeries(ampSeries);
+  const zMadSeries = zScoreSeries(madSeries);
+  const zFlipRateSeries = zScoreSeries(flipRateSeries);
+  const driftScoreSeries = featureSeries.map((item, index) => (
+    zMadSeries[index] +
+    zFlipRateSeries[index] +
+    (1 - item.coherence) +
+    zAmpSeries[index] * 0.5
+  ));
+  // 第3步：根据分布统计自动决定“分位阈值”还是“固定角度 fallback”。
+  const thresholdMeta = buildDriftThresholdMeta(driftScoreSeries, turnAngleSeries, driftConfig, percentile);
+  const {
+    quantileHighThreshold,
+    quantileLowThreshold,
+    p10,
+    p50,
+    p90,
+    spread,
+    band,
+    bandRatio,
+    highScoreRatio,
+    sufficientSamples,
+    distributionDegraded,
+    highnessGate,
+    useFallback,
+    thresholdMode,
+    highThreshold,
+    lowThreshold,
+    fallbackReason,
+    fallbackSignalSeries
+  } = thresholdMeta;
+
+  // 第4步：统一走状态机切区间。信号源会按模式自动切换（driftScore 或 |turnAngle|）。
+  const signalSeries = useFallback ? fallbackSignalSeries : driftScoreSeries;
+  const driftIntervals = detectDriftIntervalsBySignal(
+    signalSeries,
+    highThreshold,
+    lowThreshold,
+    driftConfig.startStreak,
+    driftConfig.endStreak,
+    pickDistinctRandomColor
+  );
+
+  const driftColorByIndex = Array(turnAngleSeries.length).fill(driftConfig.normalColor);
+  const driftIntervalIdByIndex = Array(turnAngleSeries.length).fill(null);
+  driftIntervals.forEach(interval => {
+    for (let i = interval.startIndex; i <= interval.endIndex; i++) {
+      if (i >= 0 && i < turnAngleSeries.length) {
+        driftColorByIndex[i] = interval.color;
+        driftIntervalIdByIndex[i] = interval.id;
+      }
+    }
+  });
+  const mergedDriftResult = buildMergedIntervals(driftIntervals);
+  const mergedDriftIntervals = mergedDriftResult.intervals;
+  const driftMergedColorByIndex = Array(turnAngleSeries.length).fill(driftConfig.normalColor);
+  const driftMergedIntervalIdByIndex = Array(turnAngleSeries.length).fill(null);
+  mergedDriftIntervals.forEach(interval => {
+    for (let i = interval.startIndex; i <= interval.endIndex; i++) {
+      if (i >= 0 && i < turnAngleSeries.length) {
+        driftMergedColorByIndex[i] = interval.color;
+        driftMergedIntervalIdByIndex[i] = interval.id;
+      }
+    }
+  });
+  for (let i = 0; i < turnAngleSeries.length; i++) {
+    turnAngleSeries[i].driftScore = Number(driftScoreSeries[i].toFixed(6));
+    turnAngleSeries[i].windowAmp = Number(featureSeries[i].amp.toFixed(6));
+    turnAngleSeries[i].windowMad = Number(featureSeries[i].mad.toFixed(6));
+    turnAngleSeries[i].flipRate = Number(featureSeries[i].flipRate.toFixed(6));
+    turnAngleSeries[i].coherence = Number(featureSeries[i].coherence.toFixed(6));
+    turnAngleSeries[i].thresholdMode = thresholdMode;
+    turnAngleSeries[i].fallbackSignal = Number(fallbackSignalSeries[i].toFixed(6));
+    turnAngleSeries[i].isDriftCandidate = driftIntervalIdByIndex[i] !== null;
+    turnAngleSeries[i].driftIntervalId = driftIntervalIdByIndex[i];
+    turnAngleSeries[i].displayColor = driftColorByIndex[i];
+    turnAngleSeries[i].driftMergedIntervalId = driftMergedIntervalIdByIndex[i];
+    turnAngleSeries[i].driftMergedColor = driftMergedColorByIndex[i];
+    turnAngleSeries[i].isDriftMergedCandidate = driftMergedIntervalIdByIndex[i] !== null;
+  }
+
+  console.log("角度漂移观测-向量x轴夹角序列", vectorAngleFromXAxisSeries);
+  console.log("角度漂移观测-相邻向量夹角序列", turnAngleSeries);
+  console.log("角度漂移观测-阈值模式", {
+    thresholdMode,
+    useFallback,
+    fallbackReason
+  });
+  console.log("角度漂移观测-退化识别统计", {
+    p10,
+    p50,
+    p90,
+    spread,
+    band,
+    bandRatio,
+    highScoreRatio,
+    sufficientSamples,
+    distributionDegraded,
+    highnessGate
+  });
+  console.log("角度漂移观测-区间阈值", {
+    highThreshold,
+    lowThreshold,
+    quantileHighThreshold,
+    quantileLowThreshold
+  });
+  console.log("角度漂移观测-识别区间", driftIntervals);
+  console.log("角度漂移观测-规则区间后处理统计", {
+    rawCount: mergedDriftResult.rawCount,
+    mergedCount: mergedDriftResult.mergedCount,
+    durationFilteredCount: mergedDriftResult.durationFilteredCount
+  });
+  console.log("角度漂移观测-规则合并过滤区间", mergedDriftIntervals);
+
+  return {
+    vectorAngleFromXAxisSeries,
+    turnAngleSeries,
+    driftIntervals,
+    mergedDriftIntervals,
+    thresholdMeta: {
+      thresholdMode,
+      useFallback,
+      fallbackReason,
+      highThreshold,
+      lowThreshold,
+      quantileHighThreshold,
+      quantileLowThreshold,
+      p10,
+      p50,
+      p90,
+      spread,
+      band,
+      bandRatio,
+      highScoreRatio,
+      sufficientSamples,
+      distributionDegraded,
+      highnessGate
+    }
+  };
 }
 
 /**
@@ -150,88 +810,52 @@ async function optimize(gpsPoints) {
  * @returns 
  */
 async function innerOptimize(gpsPoints) {
+  const {turnAngleSeries, mergedDriftIntervals} = observeStopPointDirectionDrift(gpsPoints)
 
   // 第一阶段：----------------------------------------------寻找停留点
-  var finalPoints = []; // 存储最终的轨迹点
+  var finalPoints = []; // 存储最终的轨迹点（混合语义：普通点保留，停留段替换成质心）
 
-  let N=config.minComparisonPoints 
-  let M=config.distanceThresholdPercentage
-  let X=config.distanceThreshold
-  let Z=config.stationaryEndPoints
+  // 这里我们完全改用 observeStopPointDirectionDrift 的 mergedDriftIntervals 做停留主参考。
+  // 注意索引映射：区间索引来自 turnAngleSeries，映射回 gpsPoints 时 endIndex 需要 +2。
+  const normalizedDriftIntervals = (mergedDriftIntervals || [])
+    .map(interval => {
+      const gpsStartIndex = Math.max(0, Math.min(gpsPoints.length - 1, interval.startIndex));
+      const gpsEndIndex = Math.max(
+        gpsStartIndex,
+        Math.min(gpsPoints.length - 1, interval.endIndex + 2)
+      );
+      return {
+        gpsStartIndex,
+        gpsEndIndex
+      };
+    })
+    .sort((a, b) => a.gpsStartIndex - b.gpsStartIndex);
 
-  let i = 0;
-
-  while (i < gpsPoints.length) {
-    let countWithinThreshold = 0; // 记录在距离阈值内的点的数量
-    let j = i + 1;
-
-    // 从第i个点开始，比较后续的N个点
-    for (; j < gpsPoints.length && j < i + N; j++) {
-      if (calculateDistance(gpsPoints[i], gpsPoints[j]) <= X) {
-        countWithinThreshold++; // 统计在距离阈值X内的点的数量
-      }
+  let cursor = 0;
+  for (const interval of normalizedDriftIntervals) {
+    // 先把停留区间前面的普通轨迹点原样塞回去，保证“非停留点保留”。
+    if (interval.gpsStartIndex > cursor) {
+      finalPoints.push(...gpsPoints.slice(cursor, interval.gpsStartIndex));
     }
 
-    // 如果在N个点中有至少M%的点在距离阈值内
-    if (countWithinThreshold / N >= M / 100) {
-      let staticEndIndex = i + N; // 静止状态的结束索引初始值
-      const staticPointsSequence = gpsPoints.slice(i, i + N);
-
-      // 检查后续点，直到找到连续Z个点超出距离阈值X
-      while (staticEndIndex < gpsPoints.length) {
-        let outOfThresholdCount = 0; // 记录超出阈值的点的数量
-        for (let k = staticEndIndex; k < staticEndIndex + Z && k < gpsPoints.length; k++) {
-          if (calculateDistance(gpsPoints[i], gpsPoints[k]) > X) {
-            outOfThresholdCount++;
-          }
-        }
-
-        // 如果连续Z个点中有Z个点超出距离阈值X，则认为静止状态结束
-        if (outOfThresholdCount >= Z) {
-          break;
-        }
-
-        staticPointsSequence.push(gpsPoints[staticEndIndex]);
-        staticEndIndex++;
+    // 停留区间本身用一个质心点替换，避免整段点都堆到 finalPoints。
+    const segmentStart = Math.max(cursor, interval.gpsStartIndex);
+    const segmentEnd = interval.gpsEndIndex;
+    if (segmentEnd >= segmentStart) {
+      const stopSegmentPoints = gpsPoints.slice(segmentStart, segmentEnd + 1);
+      if (stopSegmentPoints.length) {
+        const centerPoint = calculateGeographicalCenter(stopSegmentPoints);
+        finalPoints.push(centerPoint);
       }
-      const centerPoint = calculateGeographicalCenter(staticPointsSequence);//这个中心点就是质心。是停留点
-      //判断识别出来的停留点centerpoint停留时间是否>=limitStopPointTime
-      if(centerPoint.stopTimeSecondsLong >= config.limitStopPointTime*60*1000){
-         finalPoints.push(centerPoint); // 将中心点加入结果数组
-      }
-      i = staticEndIndex; // 跳到静止状态结束的点继续处理
-    } else {
-      finalPoints.push(gpsPoints[i]); // 非静止状态点，直接加入结果数组
-      i++; // 不满足静止条件，继续检查下一个点
+      cursor = Math.max(cursor, segmentEnd + 1);
     }
   }
 
-  // //当前点和下个点之间的间隔是否超过limitStopPointTime。超过的话当前点被标记为停留点
-  for(let i=0;i<finalPoints.length-1;i++){
-    let item = finalPoints[i]
-    let nextItem = finalPoints[i+1]
-    if(item.stopTimeSecondsLong||nextItem.stopTimeSecondsLong){
-      continue
-    }
-    const stopTimeSecondsLong = calculateMilliseconds(item.currentTime,nextItem.currentTime)
-    if(stopTimeSecondsLong > config.limitStopPointTime*60*1000){
-        //克隆item和nextItem
-        let stopPoint = {...item}
-        let nextStopPoint = {...nextItem}
-
-        item.startPosition=stopPoint,//开始停留时的GPS点
-        item.endPosition=nextItem,//结束停留时的GPS点
-        item.startTime=stopPoint.currentTime,//停留开始时间
-        item.endTime = nextStopPoint.currentTime,//结束停留时间
-        item.stopTimeSecondsLong=stopTimeSecondsLong,//停留时间的毫秒值
-        item.stopTimeSeconds=formatMilliseconds(stopTimeSecondsLong)//停留时间
-    }
+  // 把最后一个停留区间之后的普通点补回去。
+  if (cursor < gpsPoints.length) {
+    finalPoints.push(...gpsPoints.slice(cursor));
   }
   
-  //是否合并相距较近的停留点
-  if(config.proximityStopMerge){
-    finalPoints  = proximityStopMerge(finalPoints)
-  }
   
   // 第二阶段：----------------------------------------------初步获取停留点、总里程、平均速度以及参数自动调优过程
 
@@ -244,12 +868,10 @@ async function innerOptimize(gpsPoints) {
       autoOptimizeCount+=1
   
       config.distanceThreshold= config.distanceThreshold+5
-      config.stationaryEndPoints = config.stationaryEndPoints+3
   
       if(config.openDebug){
         console.log(`第${autoOptimizeCount}次优化`)
         console.log(config.distanceThreshold,'距离阈值')
-        console.log(config.stationaryEndPoints,'静止状态结束的连续点数')
       }
   
       return innerOptimize(gpsPoints)
@@ -374,6 +996,7 @@ async function innerOptimize(gpsPoints) {
 
   // 返回处理后的轨迹点数组
   return {
+    "turnAngleSeries":turnAngleSeries,
     "finalPoints": finalPoints,//优化后的轨迹
     "trajectoryPoints":trajectoryPoints,//优化后根据速度进行拆分的轨迹信息
     "stopPoints" : stopPoints,//所有的停留点
@@ -979,7 +1602,6 @@ function gmapServicePlanFetch(path) {
   })
 }
 
-
 /**
  * 把停留点从坐标中单独提出来
  * @param {*} points 
@@ -993,61 +1615,6 @@ function dismantleStopPoint(points){
     }
   })
   return stopPoints
-}
-
-/**
- * 把连续且相距不远的停留点识别出来并且做合并操作
- * @param {*} points 
- */
-function proximityStopMerge(points){
-  let processedPoints = []; // 存储处理后的 GPS 点
-  let i = 0; // 初始化索引
-  while (i < points.length) {
-    processedPoints.push(points[i]);
-    if (points[i].stopTimeSeconds) { // 如果当前点是停留点
-        let j = i + 1; // 设置内循环索引
-
-        while (j < points.length) { // 检查后续的停留点
-          //计算后续的点和停留点的时间间隔
-          const timeInterval = calculateMilliseconds(points[i].currentTime,points[j].currentTime)/(1000*60)
-
-          //如果比较时间间隔超过一定时间则后续的比较不做了
-          if(timeInterval <= config.proximityStopTimeInterval){
-            // 跳跃设置外循环索引
-            i = j; // 从超过 proximityStopThreshold 米的停留点继续处理
-            break; // 距离超过 proximityStopThreshold 米，结束内循环
-          }
-          
-          if (points[j].stopTimeSeconds) { // 检查是否为停留点
-            
-            //计算后续的停留点和当前停留点的距离
-            const distance = calculateDistance(
-                points[i],
-                points[j]
-            );
-
-            if (distance <= config.proximityStopThreshold ) { 
-              // 如果距离小于等于 proximityStopThreshold 米
-              // 则忽略掉后续距离较近的停留点
-            } else {
-              // 跳跃设置外循环索引
-              i = j; // 从超过 proximityStopThreshold 米的停留点继续处理
-              break; // 距离超过 proximityStopThreshold 米，结束内循环
-            }
-          }else{
-            processedPoints.push(points[j]);
-          } 
-          
-          j++; // 继续检查下一个点
-          
-        }
-        
-    }
-    
-    i++;
-  }
-
-  return processedPoints;
 }
 
 /**
