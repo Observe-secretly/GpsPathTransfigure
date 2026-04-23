@@ -1,12 +1,17 @@
 <template>
     <div class="chart-container" ref="chartContainer">
       <canvas id="speed-chart"></canvas>
+      <div
+        v-if="dynamicMileage!=0"
+        class="bubble"
+        :class="{ 'is-moving': isDragging }"
+        :style="{ left: `${bubbleLeft}px` }"
+      >
+        <div class="bubble-item"><span class="bubble-label">{{locale=='zh'?'里程:':'Mileage:'}}</span> {{dynamicMileage}} km</div>
+        <div class="bubble-item"><span class="bubble-label">{{locale=='zh'?'速度:':'Speed:'}}</span> {{currentPoint.speed !== undefined ? currentPoint.speed.toFixed(2) : '--'}} km/h</div>
+        <div class="bubble-item"><span class="bubble-label">{{locale=='zh'?'时间:':'Time:'}}</span> {{currentPoint.currentTime || '--'}}</div>
+      </div>
       <div id="slider" class="slider">
-        <div v-if="dynamicMileage!=0" class="bubble">
-          <div class="bubble-item"><span class="bubble-label">{{locale=='zh'?'里程:':'Mileage:'}}</span> {{dynamicMileage}} km</div>
-          <div class="bubble-item"><span class="bubble-label">{{locale=='zh'?'速度:':'Speed:'}}</span> {{currentPoint.speed !== undefined ? currentPoint.speed.toFixed(2) : '--'}} km/h</div>
-          <div class="bubble-item"><span class="bubble-label">{{locale=='zh'?'时间:':'Time:'}}</span> {{currentPoint.currentTime || '--'}}</div>
-        </div>
         <img :src="sliderImage" alt="Slider Handle" />
       </div>
     </div>
@@ -58,6 +63,7 @@
   const ctx = ref(null);
   const dynamicMileage=ref(0);
   const currentPoint=ref({});
+  const bubbleLeft = ref(0);
   
   // 设置画布尺寸和绘制图表
   const updateCanvasSizeAndRender = () => {
@@ -67,8 +73,16 @@
     if (!props.data.length) {
       return;
     }
-    canvas.value.width = chartContainer.value.offsetWidth;
-    canvas.value.height = chartContainer.value.offsetHeight;
+    // 提升清晰度：按 devicePixelRatio 缩放画布像素密度
+    const cssWidth = chartContainer.value.offsetWidth;
+    const cssHeight = chartContainer.value.offsetHeight;
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    canvas.value.style.width = `${cssWidth}px`;
+    canvas.value.style.height = `${cssHeight}px`;
+    canvas.value.width = Math.round(cssWidth * dpr);
+    canvas.value.height = Math.round(cssHeight * dpr);
+    // 将绘制坐标系保持在 CSS 像素单位，避免后续计算被 dpr 影响
+    ctx.value.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawLineChart();
     updateSliderPosition(slider.value.offsetLeft);
     drawStopLines();
@@ -77,33 +91,37 @@
   // 绘制折线图
   const drawLineChart = () => {
     if (ctx.value && props.data.length >= 2) {
-      ctx.value.clearRect(0, 0, ctx.value.canvas.width, ctx.value.canvas.height);
+      const width = chartContainer.value?.offsetWidth ?? 0;
+      const height = chartContainer.value?.offsetHeight ?? 0;
+      ctx.value.clearRect(0, 0, width, height);
   
       // 计算比例
       const maxSpeed = props.data.reduce((max, item) => {
         const speed = Number(item.speed);
         return !isNaN(speed) ? Math.max(max, speed) : max;
         }, -Infinity);
-      const xStep = ctx.value.canvas.width / (props.data.length - 1);
-      const yStep = ctx.value.canvas.height / maxSpeed;
+      const xStep = width / (props.data.length - 1);
+      const yStep = height / maxSpeed;
   
       // 绘制背景填充
       ctx.value.fillStyle = '#ffffff';
       // 设置背景透明度为30%
       ctx.value.globalAlpha = 0.3;
       ctx.value.beginPath();
-      ctx.value.moveTo(0, ctx.value.canvas.height);
-      ctx.value.lineTo(0, ctx.value.canvas.height - props.data[0].speed * yStep);
+      ctx.value.moveTo(0, height);
+      ctx.value.lineTo(0, height - props.data[0].speed * yStep);
   
       props.data.forEach((point, index) => {
         const x = index * xStep;
-        const y = ctx.value.canvas.height - point.speed * yStep;
+        const y = height - point.speed * yStep;
         ctx.value.lineTo(x, y);
       });
   
-      ctx.value.lineTo(ctx.value.canvas.width, ctx.value.canvas.height);
+      ctx.value.lineTo(width, height);
       ctx.value.closePath();
       ctx.value.fill();
+      // 避免透明度影响线条显示
+      ctx.value.globalAlpha = 1;
   
       // 设置线条样式
       ctx.value.strokeStyle = '#ffffff';
@@ -111,12 +129,12 @@
 
       // 绘制折线
       ctx.value.beginPath();
-      ctx.value.moveTo(0, ctx.value.canvas.height - props.data[0].speed * yStep);
+      ctx.value.moveTo(0, height - props.data[0].speed * yStep);
 
   
       props.data.forEach((point, index) => {
         const x = index * xStep;
-        const y = ctx.value.canvas.height - point.speed * yStep;
+        const y = height - point.speed * yStep;
         ctx.value.lineTo(x, y);
       });
   
@@ -130,7 +148,10 @@
       return [];
     }
     const containerWidth = chartContainer.value.offsetWidth;
-    return props.data.map((_, index) => (containerWidth / (props.data.length - 1)) * index);
+    const sliderWidth = slider.value?.offsetWidth ?? 0;
+    // 以手柄可移动的最大范围为基准，保证最后一个点可达
+    const trackWidth = Math.max(0, containerWidth - sliderWidth);
+    return props.data.map((_, index) => (trackWidth / (props.data.length - 1)) * index);
   };
   
   // 绘制停留点
@@ -148,7 +169,9 @@
         const stopWidth = 2;
         const stopLine = document.createElement('div');
         stopLine.className = 'stop-line';
-        stopLine.style.left = `${(x - stopWidth / 2)-3}px`;//向右偏移3px防止超出进度条
+        const containerWidth = chartContainer.value.offsetWidth;
+        const left = Math.max(0, Math.min(x - stopWidth / 2, containerWidth - stopWidth));
+        stopLine.style.left = `${left}px`;
         stopLine.style.width = `${stopWidth}px`;
         stopLine.style.height = '100%';
         stopLine.style.top = '0';
@@ -187,18 +210,19 @@
   
     closestX = Math.max(0, Math.min(closestX, chartContainer.value.offsetWidth - slider.value.offsetWidth));
     slider.value.style.left = closestX + 'px';
+    bubbleLeft.value = closestX + slider.value.offsetWidth / 2;
   };
   
   // 滑块拖动功能
-  let isDragging = false;
+  const isDragging = ref(false);
   
   const startDragging = (e) => {
-    isDragging = true;
+    isDragging.value = true;
     e.preventDefault();
   };
   
   const drag = (e) => {
-    if (isDragging && chartContainer.value && slider.value) {
+    if (isDragging.value && chartContainer.value && slider.value) {
         let rect = chartContainer.value.getBoundingClientRect();
         let x = e.clientX - rect.left;
         x = Math.max(0, Math.min(x, chartContainer.value.offsetWidth - slider.value.offsetWidth));
@@ -210,7 +234,7 @@
   };
   
     const stopDragging = () => {
-      isDragging = false;
+      isDragging.value = false;
     };
     
     // 点击进度条时移动滑块
@@ -345,37 +369,50 @@
   .chart-container {
     width: 90%;
     height: 40px;
-    background-color: rgba(105, 105, 105, 0.6);
-    border: 1px solid #d7d7d7;
-    border-radius: 4px;
+    background: linear-gradient(180deg, rgba(22, 24, 28, 0.55), rgba(22, 24, 28, 0.35));
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 10px;
     box-sizing: border-box;
     position: relative;
     overflow: visible;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+    backdrop-filter: blur(10px);
   }
   
   canvas {
     width: 100%;
     height: 100%;
     background-color: transparent;
+    display: block;
   }
 
   .slider {
         position: absolute;
-        top: 1px;
-        width: 8px;
-        height: 34px;
-        background-color: #d7d7d7;
+        top: 3px;
+        width: 10px;
+        height: 32px;
+        background: rgba(255, 255, 255, 0.14);
         cursor: pointer;
         z-index: 3;
         display: flex;
         align-items: center;
         justify-content: center;
-        border: 1px solid #d7d7d7;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-radius: 999px;
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.25);
+        transition: background-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
     }
+  .slider:active {
+    background: rgba(255, 255, 255, 0.2);
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.3);
+    transform: scale(1.02);
+  }
   
   .slider img {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
+    opacity: 0.95;
+    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.35));
   }
 
 
@@ -383,17 +420,23 @@
     .bubble {
         position: absolute;
         bottom: 100%; /* 位于滑块上方 */
-        left: 50%;
+        left: 0;
         transform: translateX(-50%);
-        background-color: rgba(0, 0, 0, 0.85);
+        background: rgba(15, 16, 18, 0.9);
         color: white;
-        padding: 8px 10px;
-        border-radius: 6px;
+        padding: 10px 12px;
+        border-radius: 10px;
         font-size: 12px;
         white-space: nowrap;
         margin-bottom: 10px; /* 与滑块的间距 */
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
         min-width: 150px;
+        transition: left 180ms cubic-bezier(0.22, 0.61, 0.36, 1);
+        will-change: left;
+    }
+    .bubble.is-moving {
+        transition: left 180ms cubic-bezier(0.22, 0.61, 0.36, 1);
     }
 
     .bubble::after {
@@ -404,13 +447,14 @@
         transform: translateX(-50%);
         border-width: 4px;
         border-style: solid;
-        border-color: rgba(0, 0, 0, 0.85) transparent transparent transparent;
+        border-color: rgba(15, 16, 18, 0.9) transparent transparent transparent;
     }
     
     .bubble-item {
         margin-bottom: 4px;
         display: flex;
         justify-content: space-between;
+        gap: 10px;
     }
     
     .bubble-item:last-child {
@@ -418,7 +462,7 @@
     }
     
     .bubble-label {
-        color: #a8a8a8;
+        color: rgba(255, 255, 255, 0.65);
         margin-right: 5px;
         font-weight: 500;
     }
@@ -428,7 +472,8 @@
     background-color: orange; /* 停留点颜色 */
     cursor: pointer; /* 鼠标指针 */
     z-index: 1; /* 确保停留点在折线图后面 */
-    opacity: 0.6;
+    opacity: 0.55;
+    border-radius: 999px;
     }
   </style>
   
