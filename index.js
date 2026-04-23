@@ -61,7 +61,7 @@ var config={
     driftObserveBandRatioMin:0.35,//分布退化判据1：bandRatio 最小值
     driftObserveSpreadMin:0.35,//分布退化判据2：spread 最小值
     driftObserveAbsHighScore:1.2,//高分占比统计的绝对分数线
-    driftObserveAbsMedianScoreMin:0.6,//高分门控：中位数最低要求
+    driftObserveAbsMedianScoreMin:0.7,//高分门控：中位数最低要求
     driftObserveHighScoreRatioTrigger:0.4,//高分门控：高分占比最低要求
     driftObserveMinFallbackSampleSize:30,//最小样本保护：低于此值不切 fallback
 

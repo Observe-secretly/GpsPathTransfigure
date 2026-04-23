@@ -1,110 +1,188 @@
-# 介绍
-专为设备上报的GPS点渲染轨迹而设计。优化GPS坐标轨迹。包括计算停留点、降噪、停留时间、行驶里程、速度等信息
+# GpsPathTransfigure
 
-## 高德地图效果
-![](/doc/amap_track.gif)
+面向设备上报 GPS 轨迹的优化与结构化建模库。内置**停留点时空建模（区间检测 + 密度聚类 DBSCAN）**、**鲁棒统计异常检测（IQR）**与**轨迹分段**等算法链路，用于把原始轨迹点转成可直接用于地图渲染、停留分析、轨迹回放和统计计算的结果数据。
 
-## Google地图效果
-![](/doc/gmap_track.gif)
+## 适用场景
 
+- 轨迹回放：外勤、物流、巡检、车辆历史轨迹回放。
+- 停留分析：停留点识别、停留时长统计、驻留行为分析。
+- 质量增强：抖动过滤、异常跳点处理、轨迹切段与拼接。
+- 业务建模：按运动段/停留段输出结构化 `segmentInfo`，可直接用于报表和明细卡片。
 
-# 插件使用前提
-您的GPS点必须是连续上报的。即便停止也要持续定时上报。足够多且连续的坐标点是轨迹渲染出色的前提。插件只是用来辅助解决精度和停留点数据问题
+## 使用前提与输入要求
 
-# 核心功能介绍
-- 自动识别停留点
-- 密集停留点降噪
-- 异常GPS噪点识别降噪
-- 卡片式信息展示
-- 轨迹补偿（需要配置高德密钥。国外需要配置Google Map密钥）
-- 使用门槛低
-- 支持国际化
-- 高灵活性（提供多达20+个参数根据需要自由调整）
-- 参数自动优化策略。（根据不同轨迹自适应调整部分参数）
-- 根据轨迹自动计算中心点和Zoom缩放比
-- 高性能。（异步架构）
-- 轨迹采样（为了让不同长度的轨迹渲染时长一致）
-- 随速自适应轨迹颜色（根据相对速度的不同，一段轨迹的快慢由蓝色到红色24种颜色标注出来）
-- 适配uniapp
+- 输入点位字段建议为：`[{ lng, lat, currentTime }]`。
+- 时间字段必须可被 `moment` 按 `timeformat` 正确解析（默认 `YYYY-MM-DD HH:mm:ss`）。
+- 点位应按时间升序传入，避免无序数据影响停留建模与速度计算。
+- 建议至少提供 10 个以上点位，过短轨迹不利于稳定识别。
+- 如果启用 `smoothness`，需配置 `aMapKey` 或 `gMapKey`，并评估地图 API 成本。
 
-# 停留点计算原理
-## 理论依据
-连续的GPS点中，静止不动的一段或者多段这样的点序列。把这些点序列处理成一个点，也就是拿这些序列的第一个点即可。理论依据如下：从第二个点开始，每个点都和第一个点进行距离计算和比较。至少比较N个点。当百分之M的点距离在X内的话，就继续计算比对。直到后面Z个连续点超出X，那么第一个点到超出X的第一个点，也就是Z的第一个点之前的点认为是静止状态。则这个序列被认为是静止的GPS序列，取停止点的中心点即可。后面从继续从Z的第一个点循环做这件事儿。若点不足N个，则不做任何处理
+## 插件使用
 
-![stoppoint.png](/doc/stoppoint.png)
-在连续的GPS序列中，假设前半段静止，后半段运动。则后序所有点和第一个点进行距离计算后和时间的关系图如上。静止的点拟合后的结果一定是平行于X轴的，后半段的拟合在匀速的情况下，是一个0<角度<90度的线（变速运动的话时拟合的是曲线）
+### 安装
 
-## 停留中心点计算
-识别出停留点轨迹序列后，需要计算这些点的中心点，当作停留点。算法如下：
-![centerpoint.png](/doc/centerpoint.png)
-
-# 轨迹补偿原理
-![smoothness.png](/doc/smoothness.png)
-图中绿色的段落会被识别出来，调用地图服务进行补点
-
-- 1、统计相邻两点之间的距离，去掉最大值和最小值（如果有相同的最大/小值一并去掉），统计出平均值。
-- 2、若超出平均值一定倍数`smoothnessAvgThreshold`，则判定点距离过远，需要轨迹补偿
-- 3、轨迹补偿的方式：国内使用高德地图步行路线规划功能补点；国外使用Google道路吸附功能补点
-- 4、性能方面也不必担心。插件整体架构使用了异步的方式并发处理这些补偿点。网络（客户端）正常情况下此功能会带来5%～30%的性能损耗。但它依然很快。
-
-# 自动优化
-## 什么是自动优化
-在开启自动优化`autoOptimize=true`后，插件会根据轨迹的实际情况自动调整停留点的识别精度。避免过于密集的停留点影响查阅轨迹的效果。最终精度大小取决于你的GPS坐标上报的频率和平均误差(偏移)。理论上GPS点约密集且误差在35米内，则自动优化不会触发。
-## 自动优化原理
-![autoOptimize.png](/doc/autoOptimize.png)
-图中圈圈表示为停留点范围。
-
-- 1、统计停留点之间互相进行比对。计算相距最近的停留点距离（红色部分）是否小于等于distanceThreshold(绿色部分)；
-- 2、若相距较近的点数量占总停留点数的比例超过20%，则扩大distanceThreshold参数和stationaryEndPoints参数重新进行评估计算；
-- 3、最大评估autoOptimizeMaxCount次；
-- 4、性能：评估过程不会进行多余的网路操作，仅带来极小的CPU计算开销
-
-
-# 二次开发与测试
-// TODO
-
-# 插件使用
-## 安装
-``` shell
+```shell
 npm install gpspathtransfigure
 ```
-## 引用
-``` javascript
+
+### 引用
+
+```javascript
 import GpsPathTransfigure from "gpspathtransfigure"
 ```
-## 配置
-|配置|类型|默认值|自动优化|备注|
-|--|--|--|--|--|
-|minComparisonPoints |`Number`| 10|| 最少比较的点数 |
-|distanceThresholdPercentage |`Number`| 70|| 距离阈值内的点的`百分比` |
-|distanceThreshold |`Number`| 35|`是`| 距离阈值，单位为`米` |
-|stationaryEndPoints |`Number`| 10|`是`| 判断静止状态结束的连续点数 |
-|autoOptimize |`Boolean`| true|| 是否开启参数自动优化 |
-|autoOptimizeMaxCount |`Number`| 10||自动优化调整次数上限|
-|IQRThreshold |`Number`| 1.6||(四分位距)异常值检测阈值|
-|proximityStopThreshold|`Number`|35|| 近距离停留点距离阈值。此值通常要大于等于distanceThreshold|
-|proximityStopTimeInterval|`Number`|60||近距离停留点时间间隔阈值。单位`分钟`|
-|proximityStopMerge|`Boolean`|true|| 近距离停留点合并。建议默认开启|
-|smoothness|`Boolean`|true||是否开启停留点前后点位的轨迹补偿。你必须配置对应的地图密钥。否则无效。开启此项会额外消耗移动端流量，并且轨迹渲染速度也会降低|
-|smoothnessAvgThreshold|`Number`|1.6||轨迹补偿距离倍数阈值。点之间的距离超过平均值的这个倍数后，才会被捕捉到进行轨迹补偿|
-|smoothnessLimitAvgSpeed|`Number`|20||开启轨迹补偿的最高平均速度。轨迹平均速度必须低于此值才会启用轨迹补偿.单位是`km/h`|
-|aMapKey|`String`||| 配置高德地图可以调用路线规划的`Web服务密钥`。轨迹补偿时使用|
-|gMapKey|`String`||| 配置google地图`密钥`。轨迹补偿时使用|
-|defaultMapService|`String`||| 默认地图服务。枚举值【amap】【gmap】。配置后将会强制使用相应的地图服务。不配置，则默认语言是zh时使用amap。其它语言都使用googleMap|
-|format |`Boolean`| true||是否格式化数据内容。如里程、时间信息。若开启则根据locale配置输出对应国家语言的信息的内容|
-|locale |`String`| zh||设置语言|
-|timeformat|`String`|yyyy-MM-dd HH mm:ss||指定时间格式化方式|
-|mapWidth|`Number`|1024||地图容器的宽度。单位`px`。zoom计算时使用|
-|mapHeight|`Number`|768||地图容器的高度。单位`px`。zoom计算时使用|
-|defaultZoom|`Number`|16||默认地图缩放比。如果无法根据轨迹计算出缩放比，则使用此值|
-|pathColorOptimize|`Boolean`|true||是否开启轨迹颜色美化|
-|speedColors|`Array`| `["#3366FF", "#3369FF", "#336CFF", "#336FFF", "#3372FF", "#3375FF","#3399FF", "#33A3FF", "#33ADFF", "#33B7FF", "#33C1FF", "#33CCFF", "#66FF00", "#7FFF00", "#99FF00", "#B2FF00", "#CCFF00", "#E6FF00", "#FFCC00", "#FF9933", "#FF9966", "#FF6633", "#FF3300", "#FF0000"]`||速度由慢到快的24级颜色代码|
-|samplePointsNum|`Number`|200||轨迹采样数。用于控制返回值samplePoints的长度。samplePoints用于渲染轨迹使用|
-|useUniApp|`Boolean`|false||此处如果为true，则代表使用uniapp环境，一些网络请求会以uniapp的方式进行调用|
 
+### 快速开始（最小闭环）
 
+```javascript
+import GpsPathTransfigure from "gpspathtransfigure";
+
+GpsPathTransfigure.conf({
+  locale: "zh",
+  openDebug: false,
+  pathColorOptimize: true,
+});
+
+const result = await GpsPathTransfigure.optimize(gpsPoints);
+const { finalPoints, trajectoryPoints, stopPoints, segmentInfo } = result;
+```
+
+#### 输出如何落图
+
+- `finalPoints`：适合直接画主轨迹线（已完成停留建模和异常处理）。
+- `trajectoryPoints`：适合按速度颜色渐变渲染轨迹。
+- `stopPoints`：适合做停留标注、停留卡片、停留时长展示。
+- `segmentInfo`：适合做“运动段/停留段”时间轴与明细列表。
+
+## 效果预览（重点）
+
+### A. 静止 + 高频抖动（3 组样本）
+
+> 目标：在静止场景中抑制高频漂移，稳定识别停留段，减少“原地乱跳”。
+
+![静止高频抖动样本1](/doc/gps_stationary_high_jitter_1.gif)
+![静止高频抖动样本2](/doc/gps_stationary_high_jitter_2.gif)
+![静止高频抖动样本3](/doc/gps_stationary_high_jitter_3.gif)
+
+### B. 行驶 + 少量抖动（3 组样本）
+
+> 目标：在行驶轨迹中保留运动形态，减少轻微抖动对轨迹平滑性和里程统计的干扰。
+
+![行驶低噪样本1](/doc/gps_moving_low_noise_1.gif)
+![行驶低噪样本2](/doc/gps_moving_low_noise_2.gif)
+![行驶低噪样本3](/doc/gps_moving_low_noise_3.gif)
+
+## 核心功能特性
+
+- 停留点时空建模：基于**方向漂移特征**识别停留候选区间，并通过**时长阈值 + 区间合并（距离/时间间隔）**稳定停留段。
+- 时空聚类二次判定：对停留候选区间做**密度聚类（DBSCAN）**与密度评分，释放低密度误判区间（更抗抖动/漂移）。
+- 轨迹鲁棒降噪：包含原始噪声过滤、**IQR（四分位距）**异常跳点识别与处理（剔除毛刺/降低里程失真）。
+- 轨迹分段：输出 `motion/stopped` 结构化分段，支持业务端直接消费。
+- 渲染增强：支持按速度分级着色轨迹输出，提升回放可读性。
+- 轨迹补偿：可选调用地图服务做轨迹补点（`smoothness`）。
+- 统计指标：输出 `avgSpeed`、`moveAvgSpeed`、`totalMileage`、`trajectoryMileage`。
+
+## 算法与建模流程
+
+`optimize` 的主流程为：噪声过滤 -> 停留区间观测 -> 停留替换建模 -> 里程速度计算 -> 可选补偿 -> 异常剔除/切段 -> 轨迹拼接 -> 分段输出。
+
+```mermaid
+flowchart TD
+  inputGps[InputGpsPoints] --> noiseFilter[NoiseRecognitionFilter]
+  noiseFilter --> driftObserve[DirectionDriftObserve]
+  driftObserve --> stopModel[StopIntervalModeling]
+  stopModel --> mileageSpeed[SpeedAndMileageCalc]
+  mileageSpeed --> smoothnessOpt[OptionalSmoothness]
+  smoothnessOpt --> iqrRemove[IQRSpikeRemoval]
+  iqrRemove --> iqrSplit[IQRTrajectorySplit]
+  iqrSplit --> mergeSegments[MergeSegments]
+  mergeSegments --> segmentInfo[GenerateSegmentInfo]
+  segmentInfo --> outputs[FinalOutputs]
+```
+
+### 关键建模说明
+
+- 停留识别主参考：`observeStopPointDirectionDrift` 的 `mergedDriftIntervals`（基于相邻向量夹角、窗口特征与阈值策略形成区间）。
+- 时空约束的停留建模：区间会应用**最小时长（分钟级）**约束，并支持按**空间距离阈值 + 时间间隔阈值**做区间合并，减少断断续续的停留碎片。
+- 停留点输出形式：停留区间点集会被替换为一个**地理质心（centroid）**点，并携带 `startPosition/endPosition/startTime/endTime/stopTimeSeconds` 等停留语义字段。
+- 密度聚类二次判定：对每个候选区间内的点做 **DBSCAN** 并计算密度分数，低于阈值则释放为普通点（避免把“漂移但不集中”的点误判为停留）。
+- 异常毛刺处理：通过 **IQR** 检测极端跳点，执行剔除或切段，降低里程与速度的系统性偏差。
+
+## 配置参数（按代码实现整理）
+
+### 1) 基础与格式化
+
+| 参数 | 类型 | 默认值 | 说明 |
+| -- | -- | -- | -- |
+| `distanceThreshold` | `Number` | `35` | 距离阈值（米） |
+| `format` | `Boolean` | `true` | 是否格式化里程/时间文案 |
+| `locale` | `String` | `zh` | 国际化语言 |
+| `timeformat` | `String` | `YYYY-MM-DD HH:mm:ss` | 时间解析格式 |
+| `mapWidth` | `Number` | `1024` | 地图宽度（用于计算 zoom） |
+| `mapHeight` | `Number` | `768` | 地图高度（用于计算 zoom） |
+| `defaultZoom` | `Number` | `16` | zoom 回退值 |
+| `useUniApp` | `Boolean` | `false` | 是否使用 uniapp 请求方式 |
+| `openDebug` | `Boolean` | `false` | 是否输出调试日志 |
+
+### 2) 异常识别与统计
+
+| 参数 | 类型 | 默认值 | 说明 |
+| -- | -- | -- | -- |
+| `abnormalPointRatio` | `Number` | `0.05` | 异常点占比阈值，超过时判定异常识别不适用 |
+| `IQRThreshold` | `Number` | `2.5` | 里程异常 IQR 阈值 |
+| `speedIQRThreshold` | `Number` | `0.75` | 速度异常 IQR 阈值 |
+| `limitSpeed` | `Number` | `150` | 速度上限（km/h） |
+| `proximityStopThreshold` | `Number` | `45` | 近距离停留阈值（米） |
+| `proximityStopTimeInterval` | `Number` | `60` | 近距离停留时间阈值（分钟） |
+| `proximityStopMerge` | `Boolean` | `true` | 近距离停留点合并（兼容保留） |
+
+### 3) 轨迹补偿（可选）
+
+| 参数 | 类型 | 默认值 | 说明 |
+| -- | -- | -- | -- |
+| `smoothness` | `Boolean` | `false` | 是否启用轨迹补偿 |
+| `smoothnessAvgThreshold` | `Number` | `1.6` | 点距超过均值倍数时触发补偿候选 |
+| `smoothnessLimitAvgSpeed` | `Number` | `40` | 启用补偿的平均速度上限（km/h） |
+| `aMapKey` | `String` | `''` | 高德地图 key |
+| `gMapKey` | `String` | `''` | Google 地图 key |
+| `defaultMapService` | `String` | `''` | 强制地图服务：`amap` / `gmap` |
+
+### 4) 轨迹渲染
+
+| 参数 | 类型 | 默认值 | 说明 |
+| -- | -- | -- | -- |
+| `pathColorOptimize` | `Boolean` | `true` | 是否开启按速度着色 |
+| `speedColors` | `Array` | 24 级颜色数组 | 速度由慢到快的色阶 |
+| `samplePointsNum` | `Number` | `200` | 输出抽样点数量上限 |
+
+### 5) 漂移观测（停留建模核心参数）
+
+| 参数 | 默认值 | 含义 |
+| -- | -- | -- |
+| `driftObserveWindowSize` | `31` | 漂移观测窗口大小 |
+| `driftObserveStartStreak` / `driftObserveEndStreak` | `5` / `5` | 进入/退出区间连续命中点数 |
+| `driftObserveHighQuantile` / `driftObserveLowQuantile` | `0.65` / `0.35` | 分位阈值 |
+| `driftObserveBandRatioMin` / `driftObserveSpreadMin` | `0.35` / `0.35` | 分布退化判据 |
+| `driftObserveAbsHighScore` | `1.2` | 高分绝对线 |
+| `driftObserveAbsMedianScoreMin` | `0.7` | 中位数门控 |
+| `driftObserveHighScoreRatioTrigger` | `0.4` | 高分占比门控 |
+| `driftObserveMinFallbackSampleSize` | `30` | fallback 最小样本保护 |
+| `driftObserveAbsAngleHigh` / `driftObserveAbsAngleLow` | `60` / `35` | 固定角度 fallback 阈值 |
+| `driftObserveMergeDistanceThresholdMeters` | `55` | 区间合并距离阈值（米） |
+| `driftObserveMergeGapMaxMinutes` | `45` | 区间合并时间间隔阈值（分钟） |
+| `driftObserveMinStopDurationMinutes` | `30` | 最短停留时长阈值（分钟） |
+| `driftObserveDensityEpsMeters` / `driftObserveDensityMinPts` | `50` / `5` | DBSCAN 核心参数 |
+| `driftObserveDensitySampleTriggerCount` | `100` | 密度观测触发采样阈值 |
+| `driftObserveDensityMaxPoints` | `200` | 密度观测最大点数 |
+| `driftObserveDensityScoreThreshold` | `0.6` | 密度分数释放阈值 |
+
+### 兼容保留参数（旧逻辑，不建议新项目依赖）
+
+`minComparisonPoints`、`distanceThresholdPercentage`、`stationaryEndPoints`、`limitStopPointTime`、`autoOptimize`、`autoOptimizeMaxCount`。
+
+---
 
 ## 使用案例(Vue3)
+
 ``` javascript
 <script setup>
   import { onMounted } from "vue";
@@ -138,10 +216,11 @@ onMounted(async ()=>{
 ......
 </script>
 ```
+
 请注意，在使用此插件时需要异步引用。代码中直接使用finalPoints渲染轨迹即可。若想要渲染停留点标注效果，则渲染所有的stopPoints。渲染带颜色的轨迹请使用trajectoryPoints渲染。高德地图和Google地图的渲染案例请查阅Amap.vue/Gmap.vue源码
 
-
 ## 进度条使用方法
+
 ``` javascript
 <template>
 ......
@@ -168,27 +247,48 @@ import ProgressChart from 'gpspathtransfigure/src/component/ProgressChart.vue';
 
 </script>
 ```
+
 项目中Amap.vue有完整的使用案例
 
 ## 返回值说明
-|返回值|含义|
-|--|--|
-|finalPoints|优化后的轨迹。格式[{lng: xx, lat: xx, currentTime: xx}]，若坐标点中出现`type: 'add'`则代表此点是噪点轨迹补偿处理时的补点|
-|trajectoryPoints|优化后根据速度进行拆分的轨迹信息，用于颜色渲染。格式[{path: [{lng: xx, lat: xx}], color: xx, type: xx}]|
-|stopPoints|所有的停留点。格式[{lng: xx, lat: xx, currentTime: xx, startPosition: xx, endPosition: xx, startTime: xx, endTime: xx, stopTimeSeconds: xx}]|
-|center|中心点。格式{lng: xx, lat: xx}|
-|zoom|缩放比例，用于地图初始化时的缩放级别|
-|segmentInfo|分段信息，包含运动段和停留段的详细信息。格式[{type: "motion/stopped", startPosition: {lat: xx, lng: xx}, endPosition: {lat: xx, lng: xx}, duration: xx, startTime: xx, endTime: xx, distance: xx, averageSpeed: xx}]|
-|startPoint|轨迹的开始点，即finalPoints的第一个点|
-|endPoint|轨迹的结束点，即finalPoints的最后一个点|
-|samplePoints|轨迹抽样数据（固定数量），用于轨迹概览|
-|avgSpeed|平均速度(去掉最小值和最大值)。包含停留时间和运动时间的平均速度，单位为km/h|
-|moveAvgSpeed|移动平均速度。剔除了停留时间后统计的平均速度，单位为km/h|
-|totalMileage|总里程：包含虚线轨迹（异常轨迹段的补点）。单位为m|
-|trajectoryMileage|轨迹里程：真实设备上报的gps点轨迹。不包含虚线轨迹。单位为m|
 
+| 字段 | 含义 | 主要用途 |
+| -- | -- | -- |
+| `turnAngleSeries` | 角度漂移观测序列（调参与分析用） | 停留识别调试 |
+| `finalPoints` | 优化后的轨迹主点集（包含停留建模结果） | 主轨迹渲染 |
+| `trajectoryPoints` | 按速度拆分后的着色轨迹片段 | 渐变轨迹渲染 |
+| `stopPoints` | 停留点集合（含起止时间与停留时长） | 停留标注、停留统计 |
+| `center` | 轨迹中心点 | 地图初始化 |
+| `zoom` | 自动计算的缩放级别 | 地图初始化 |
+| `segmentInfo` | 运动段/停留段结构化信息 | 行程卡片、明细报表 |
+| `startPoint` / `endPoint` | 轨迹起终点 | 起终点标注 |
+| `samplePoints` | 固定数量抽样点 | 轨迹预览/缩略图 |
+| `avgSpeed` | 全时段平均速度（含停留） | 总览统计 |
+| `moveAvgSpeed` | 仅运动段平均速度 | 运动效率分析 |
+| `totalMileage` | 总里程（含补点/虚线连接影响） | 总览统计 |
+| `trajectoryMileage` | 真实轨迹里程（不含虚线连接） | 真实里程统计 |
 
+## 调试与可视化说明
 
+### debuggingMode.png：停留点建模调试示意
 
-# 问题反馈或
- Github提交issues
+![停留建模调试示意](/doc/debuggingMode.png)
+
+该图用于解释停留点建模过程中的观测信号与区间判断逻辑，适合配合 `openDebug: true` 排查停留误判或漏判。
+
+### trajectorySegmentation.png：轨迹分段示意
+
+![轨迹分段示意](/doc/trajectorySegmentation.png)
+
+该图用于展示轨迹被分解为 `motion` 与 `stopped` 段后的结构化结果，可用于时间轴、分段卡片和行为分析视图。
+
+## 调参建议（按场景）
+
+- 静止抖动明显：优先关注 `driftObserveWindowSize`、`driftObserveAbsAngleHigh/Low`、`driftObserveDensityScoreThreshold`。
+- 行驶为主且抖动轻微：保持默认漂移参数，重点调整 `IQRThreshold` 与 `pathColorOptimize`。
+- 存在长距离跳点：适当降低 `IQRThreshold`，观察切段结果与 `trajectoryMileage` 变化。
+- 需要轨迹更平滑：开启 `smoothness`，并配合 `smoothnessLimitAvgSpeed` 控制误补点风险。
+
+## 问题反馈
+
+- GitHub issues: [https://github.com/Observe-secretly/GpsPathTransfigure/issues](https://github.com/Observe-secretly/GpsPathTransfigure/issues)
