@@ -94,22 +94,46 @@
       const width = chartContainer.value?.offsetWidth ?? 0;
       const height = chartContainer.value?.offsetHeight ?? 0;
       ctx.value.clearRect(0, 0, width, height);
+      const cornerRadius = 10;
+      const edgeExtension = 12;
   
       // 计算比例
       const maxSpeed = props.data.reduce((max, item) => {
         const speed = Number(item.speed);
         return !isNaN(speed) ? Math.max(max, speed) : max;
         }, -Infinity);
+      const safeMaxSpeed = Number.isFinite(maxSpeed) && maxSpeed > 0 ? maxSpeed : 1;
       const xStep = width / (props.data.length - 1);
-      const yStep = height / maxSpeed;
+      const yStep = height / safeMaxSpeed;
+
+      const firstY = height - props.data[0].speed * yStep;
+      const lastY = height - props.data[props.data.length - 1].speed * yStep;
+
+      // 使用圆角裁切路径，确保折线和填充与外层圆角一致
+      ctx.value.save();
+      ctx.value.beginPath();
+      if (typeof ctx.value.roundRect === 'function') {
+        ctx.value.roundRect(0, 0, width, height, cornerRadius);
+      } else {
+        ctx.value.moveTo(cornerRadius, 0);
+        ctx.value.lineTo(width - cornerRadius, 0);
+        ctx.value.quadraticCurveTo(width, 0, width, cornerRadius);
+        ctx.value.lineTo(width, height - cornerRadius);
+        ctx.value.quadraticCurveTo(width, height, width - cornerRadius, height);
+        ctx.value.lineTo(cornerRadius, height);
+        ctx.value.quadraticCurveTo(0, height, 0, height - cornerRadius);
+        ctx.value.lineTo(0, cornerRadius);
+        ctx.value.quadraticCurveTo(0, 0, cornerRadius, 0);
+      }
+      ctx.value.clip();
   
       // 绘制背景填充
       ctx.value.fillStyle = '#ffffff';
       // 设置背景透明度为30%
       ctx.value.globalAlpha = 0.3;
       ctx.value.beginPath();
-      ctx.value.moveTo(0, height);
-      ctx.value.lineTo(0, height - props.data[0].speed * yStep);
+      ctx.value.moveTo(-edgeExtension, height);
+      ctx.value.lineTo(-edgeExtension, firstY);
   
       props.data.forEach((point, index) => {
         const x = index * xStep;
@@ -117,7 +141,8 @@
         ctx.value.lineTo(x, y);
       });
   
-      ctx.value.lineTo(width, height);
+      ctx.value.lineTo(width + edgeExtension, lastY);
+      ctx.value.lineTo(width + edgeExtension, height);
       ctx.value.closePath();
       ctx.value.fill();
       // 避免透明度影响线条显示
@@ -129,7 +154,7 @@
 
       // 绘制折线
       ctx.value.beginPath();
-      ctx.value.moveTo(0, height - props.data[0].speed * yStep);
+      ctx.value.moveTo(-edgeExtension, firstY);
 
   
       props.data.forEach((point, index) => {
@@ -137,8 +162,11 @@
         const y = height - point.speed * yStep;
         ctx.value.lineTo(x, y);
       });
+
+      ctx.value.lineTo(width + edgeExtension, lastY);
   
       ctx.value.stroke();
+      ctx.value.restore();
     }
   };
   
@@ -384,6 +412,7 @@
     height: 100%;
     background-color: transparent;
     display: block;
+    border-radius: inherit;
   }
 
   .slider {
