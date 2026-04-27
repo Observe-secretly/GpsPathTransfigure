@@ -101,8 +101,7 @@ flowchart TD
 
 ### 关键建模说明
 
-- 停留识别主参考：`observeStopPointDirectionDrift` 的 `mergedDriftIntervals`（基于相邻向量夹角、窗口特征与阈值策略形成区间）。
-- 时空约束的停留建模：区间会应用**最小时长（分钟级）**约束，并支持按**空间距离阈值 + 时间间隔阈值**做区间合并，减少断断续续的停留碎片。
+- 停留识别主参考：`observeStopPointDirectionDrift` 的 `mergedDriftIntervals`（先产出候选 `candidate interval`，再做区间后处理）。\n+  - **第一层：候选区间识别（candidate interval detection）**：主通道还是方向漂移（相邻向量夹角 + 窗口特征 + 阈值策略），它对“原地抖动、来回跳点”很敏感。\n+  - 同时加了一路 **低速候选信号（low-speed signal）**：当窗口里原始速度一直很低、低速点占比也高时，也允许进入候选区间。这个补丁主要是为了抓住那种“角度不怎么抖，但速度长期接近 0”的真实停留。\n+  - **第二层：运动反证（motion rebuttal）**：候选出来之后先别急着当停留。只要发现区间呈现“速度持续偏高 + 速度/方向稳定（用 MAD 这类鲁棒统计量看稳定性）+ 质量门控（quality gate）通过”，就强制把它释放回运动段，避免把“拐弯/顺路慢行/稳定行驶”误固定成停留点。\n+- 时空约束的停留建模：区间会应用**最小时长（分钟级）**约束，并支持按**空间距离阈值 + 时间间隔阈值**做区间合并，减少断断续续的停留碎片。
 - 停留点输出形式：停留区间点集会被替换为一个**地理质心（centroid）**点，并携带 `startPosition/endPosition/startTime/endTime/stopTimeSeconds` 等停留语义字段。
 - 密度聚类二次判定：对每个候选区间内的点做 **DBSCAN** 并计算密度分数，低于阈值则释放为普通点（避免把“漂移但不集中”的点误判为停留）。
 - 异常毛刺处理：通过 **IQR** 检测极端跳点，执行剔除或切段，降低里程与速度的系统性偏差。
@@ -174,6 +173,17 @@ flowchart TD
 | `driftObserveDensitySampleTriggerCount` | `100` | 密度观测触发采样阈值 |
 | `driftObserveDensityMaxPoints` | `200` | 密度观测最大点数 |
 | `driftObserveDensityScoreThreshold` | `0.6` | 密度分数释放阈值 |
+| `driftObserveLowSpeedCandidateEnabled` | `true` | 第一层：是否启用低速候选（low-speed signal）参与停留候选区间识别 |
+| `driftObserveLowSpeedThresholdKmh` | `3` | 第一层：低速阈值（km/h），原始速度 <= 该值视为低速点 |
+| `driftObserveLowSpeedRatioThreshold` | `0.7` | 第一层：窗口内低速点占比阈值，达到后命中低速候选 |
+| `driftObserveMotionRejectEnabled` | `true` | 第二层：是否启用运动反证（motion rebuttal），命中则释放候选区间为运动段 |
+| `driftObserveMotionRejectMedianSpeedKmh` | `8` | 第二层：区间原始速度中位数 >= 该值才可能触发反证 |
+| `driftObserveMotionRejectStableSpeedMaxMadKmh` | `2` | 第二层：速度稳定性门控（MAD <= 阈值） |
+| `driftObserveMotionRejectStableDirectionMaxMadDeg` | `20` | 第二层：方向稳定性门控（环形 MAD <= 阈值） |
+| `driftObserveMotionRejectGoodHdopMax` | `3` | 第二层：质量门控（quality gate）- hdop 上限 |
+| `driftObserveMotionRejectGoodVdopMax` | `5` | 第二层：质量门控（quality gate）- vdop 上限 |
+| `driftObserveMotionRejectMinSatelliteCount` | `6` | 第二层：质量门控（quality gate）- 卫星数下限 |
+| `driftObserveMotionRejectQualityRatioThreshold` | `0.7` | 第二层：区间内“好质量点”占比阈值，达到才允许触发反证 |
 
 ### 兼容保留参数（旧逻辑，不建议新项目依赖）
 
@@ -285,6 +295,8 @@ import ProgressChart from 'gpspathtransfigure/src/component/ProgressChart.vue';
 ## 调参建议（按场景）
 
 - 静止抖动明显：优先关注 `driftObserveWindowSize`、`driftObserveAbsAngleHigh/Low`、`driftObserveDensityScoreThreshold`。
+- 漏判“角度不怎么抖但确实停住”的场景：先别急着改方向阈值，优先把第一层的低速候选打开并调顺（`driftObserveLowSpeedCandidateEnabled`、`driftObserveLowSpeedThresholdKmh`、`driftObserveLowSpeedRatioThreshold`）。直觉上这是在补**召回（recall）**：让真实停留别漏掉。
+- 容易把拐弯/慢行/稳定行驶误判成停留：优先看第二层运动反证（`driftObserveMotionReject*`）。你可以先从 `driftObserveMotionRejectMedianSpeedKmh` 下手，再用 `Stable*Mad` 和 `quality gate`（`hdop/vdop/satelliteCount`）把“高质量稳定运动段”稳稳放回去。直觉上这是在提**精确（precision）**：把误停留释放出来。
 - 行驶为主且抖动轻微：保持默认漂移参数，重点调整 `IQRThreshold` 与 `pathColorOptimize`。
 - 存在长距离跳点：适当降低 `IQRThreshold`，观察切段结果与 `trajectoryMileage` 变化。
 - 需要轨迹更平滑：开启 `smoothness`，并配合 `smoothnessLimitAvgSpeed` 控制误补点风险。

@@ -52,11 +52,11 @@ var config={
 
     // ------------------------ 漂移观测（observeStopPointDirectionDrift）参数区 ------------------------
     // 这块是“角度漂移观测”的统一配置。你以后调参，优先改这里，不用进函数里找常量。
-    driftObserveWindowSize:31,//窗口大小（滑动窗口）。越大越稳，越小越灵敏
+    driftObserveWindowSize:40,//窗口大小（滑动窗口）。越大越稳，越小越灵敏
     driftObserveStartStreak:5,//进入区间前，需要连续命中高阈值的点数（原来过大容易一个区间都进不去）
-    driftObserveEndStreak:5,//退出区间前，需要连续命中低阈值的点数
-    driftObserveHighQuantile:0.65,//分位模式下的高阈值分位点
-    driftObserveLowQuantile:0.35,//分位模式下的低阈值分位点（建议小于高阈值分位）
+    driftObserveEndStreak:10,//退出区间前，需要连续命中低阈值的点数
+    driftObserveHighQuantile:0.60,//分位模式下的高阈值分位点
+    driftObserveLowQuantile:0.30,//分位模式下的低阈值分位点（建议小于高阈值分位）
 
     driftObserveBandRatioMin:0.35,//分布退化判据1：bandRatio 最小值
     driftObserveSpreadMin:0.35,//分布退化判据2：spread 最小值
@@ -68,20 +68,21 @@ var config={
     driftObserveAbsAngleHigh:60,//fallback（固定角度模式）进入阈值（漂移抖动场景适当降低，避免“rawCount=0”）
     driftObserveAbsAngleLow:35,//fallback（固定角度模式）退出阈值（保持滞回，避免频繁抖动开关）
 
-    driftObserveMergeDistanceThresholdMeters:55,//区间合并：中心点距离阈值（米）
-    driftObserveMergeGapMaxMinutes:45,//区间合并：区间间隔阈值（分钟）
-    driftObserveMinStopDurationMinutes:30,//区间保留：最短时长阈值（分钟）
-    driftObserveDensityEpsMeters:50,//DBSCAN密度半径（米）
-    driftObserveDensityMinPts:5,//DBSCAN最小核心点邻居数
-    driftObserveDensitySampleTriggerCount:100,//DBSCAN性能保护：点数超过该值时触发采样
-    driftObserveDensityMaxPoints:200,//DBSCAN性能保护：参与聚类的点数上限（超过就采样到最多100个点）
-    driftObserveDensityScoreThreshold:0.6,//二次判定阈值：densityScore低于此值就释放为普通点
+    driftObserveMergeDistanceThresholdMeters:50,//区间合并：中心点距离阈值（米）
+    driftObserveMergeGapMaxMinutes:30,//区间合并：区间间隔阈值（分钟）
+    driftObserveMinStopDurationMinutes:45,//区间保留：最短时长阈值（分钟）
+    
     driftObserveDensityScoreEnabled:true,//是否开启DBSCAN密度二次判定（关闭后所有时长过滤后的合并区间都直接保留为停留点）
+    driftObserveDensityEpsMeters:15,//DBSCAN密度半径（米）
+    driftObserveDensityMinPts:8,//DBSCAN最小核心点邻居数
+    driftObserveDensitySampleTriggerCount:200,//DBSCAN性能保护：点数超过该值时触发采样
+    driftObserveDensityMaxPoints:300,//DBSCAN性能保护：参与聚类的点数上限（超过就采样到最多100个点）
+    driftObserveDensityScoreThreshold:0.6,//二次判定阈值：densityScore低于此值就释放为普通点
 
     // ------------------------ 低速候选（第一层，与方向漂移并列） ------------------------
     driftObserveLowSpeedCandidateEnabled:true,//是否把「窗口内低速占比」作为候选区间来源（默认开；关闭则与旧版行为一致，仅方向漂移）
     driftObserveLowSpeedThresholdKmh:3,//原始速度低于等于该值（km/h，来自 p 解析）视为低速采样点
-    driftObserveLowSpeedRatioThreshold:0.8,//窗口内低速点占比达到该值则该转角索引命中低速候选
+    driftObserveLowSpeedRatioThreshold:0.65,//窗口内低速点占比达到该值则该转角索引命中低速候选
 
     // ------------------------ 运动反证（第二层） ------------------------
     driftObserveMotionRejectEnabled:true,//是否启用“高质量稳定运动反证”，命中则释放停留候选区间
