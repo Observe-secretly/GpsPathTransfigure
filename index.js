@@ -76,6 +76,7 @@ var config={
     driftObserveDensitySampleTriggerCount:100,//DBSCAN性能保护：点数超过该值时触发采样
     driftObserveDensityMaxPoints:200,//DBSCAN性能保护：参与聚类的点数上限（超过就采样到最多100个点）
     driftObserveDensityScoreThreshold:0.6,//二次判定阈值：densityScore低于此值就释放为普通点
+    driftObserveDensityScoreEnabled:true,//是否开启DBSCAN密度二次判定（关闭后所有时长过滤后的合并区间都直接保留为停留点）
 }
 
 
@@ -173,7 +174,8 @@ function createEmptyDriftObservationResult() {
  *  bandRatioMin:number,spreadMin:number,absHighScore:number,absMedianScoreMin:number,highScoreRatioTrigger:number,
  *  minFallbackSampleSize:number,absAngleHigh:number,absAngleLow:number,normalColor:string,
  *  mergeDistanceThresholdMeters:number,mergeGapMaxMinutes:number,minStopDurationMinutes:number,
- *  densityEpsMeters:number,densityMinPts:number,densitySampleTriggerCount:number,densityMaxPoints:number,densityScoreThreshold:number
+ *  densityEpsMeters:number,densityMinPts:number,densitySampleTriggerCount:number,densityMaxPoints:number,densityScoreThreshold:number,
+ *  densityScoreEnabled:boolean
  * }}
  */
 function resolveDriftObservationConfig() {
@@ -200,7 +202,8 @@ function resolveDriftObservationConfig() {
     densityMinPts: config.driftObserveDensityMinPts,
     densitySampleTriggerCount: config.driftObserveDensitySampleTriggerCount,
     densityMaxPoints: config.driftObserveDensityMaxPoints,
-    densityScoreThreshold: config.driftObserveDensityScoreThreshold
+    densityScoreThreshold: config.driftObserveDensityScoreThreshold,
+    densityScoreEnabled: config.driftObserveDensityScoreEnabled !== false
   };
 }
 
@@ -718,29 +721,17 @@ function observeStopPointDirectionDrift(gpsPoints) {
   const mergedDriftResult = buildMergedIntervals(driftIntervals);
   const mergedDriftIntervalsRaw = mergedDriftResult.intervals;
   // 二次判定：对每个停留区间做 DBSCAN 密度打分，低于阈值则释放为普通点。
-  const densityScoredMergedIntervals = mergedDriftIntervalsRaw.map((interval, index) => {
-    const gpsStartIndex = Math.max(0, Math.min(gpsPoints.length - 1, interval.startIndex));
-    const gpsEndIndex = Math.max(
-      gpsStartIndex,
-      Math.min(gpsPoints.length - 1, interval.endIndex + 2)
-    );
-    const stopSegmentPoints = gpsPoints.slice(gpsStartIndex, gpsEndIndex + 1);
-    const sampledPoints = samplePointsUniformly(
-      stopSegmentPoints,
-      driftConfig.densitySampleTriggerCount,
-      driftConfig.densityMaxPoints
-    );
-    const dbscanResult = runDbscan(sampledPoints, driftConfig.densityEpsMeters, driftConfig.densityMinPts);
-    const densityMetrics = buildDensityScore(sampledPoints, dbscanResult);
-    return {
-      intervalId: interval.id || index + 1,
-      interval,
-      pointCount: stopSegmentPoints.length,
-      sampledPointCount: sampledPoints.length,
-      densityMetrics,
-      keepAsStop: densityMetrics.densityScore >= driftConfig.densityScoreThreshold
-    };
-  });
+  // 关掉开关时直接跳过密度打分，所有合并区间都视作有效停留点。
+  const densityScoredMergedIntervals = driftConfig.densityScoreEnabled
+    ? scoreStopIntervalsByDensity(mergedDriftIntervalsRaw, gpsPoints, driftConfig)
+    : mergedDriftIntervalsRaw.map((interval, index) => ({
+        intervalId: interval.id || index + 1,
+        interval,
+        pointCount: 0,
+        sampledPointCount: 0,
+        densityMetrics: null,
+        keepAsStop: true
+      }));
   const mergedDriftIntervals = densityScoredMergedIntervals
     .filter(item => item.keepAsStop)
     .map(item => item.interval);
@@ -821,7 +812,7 @@ function observeStopPointDirectionDrift(gpsPoints) {
         maxPoints: driftConfig.densityMaxPoints,
         densityScoreThreshold: driftConfig.densityScoreThreshold,
         keepAsStop: item.keepAsStop,
-        ...item.densityMetrics
+        ...(item.densityMetrics || {})
       });
     });
   }
@@ -968,6 +959,40 @@ function samplePointsUniformly(points, sampleTriggerCount, maxPoints) {
     sampled.push(points[idx]);
   }
   return sampled;
+}
+
+/**
+ * 对每个停留区间做 DBSCAN 密度打分作为“二次判定”。
+ * 低于阈值则视作普通点段，由调用方决定是否释放。
+ * @param {Array<{startIndex:number,endIndex:number,id?:number}>} mergedIntervals 一次合并后的停留区间
+ * @param {Array<{lat:number,lng:number}>} gpsPoints 原始 GPS 点序列
+ * @param {{densitySampleTriggerCount:number,densityMaxPoints:number,densityEpsMeters:number,densityMinPts:number,densityScoreThreshold:number}} driftConfig 漂移观测配置
+ * @returns {Array<{intervalId:number,interval:object,pointCount:number,sampledPointCount:number,densityMetrics:object,keepAsStop:boolean}>}
+ */
+function scoreStopIntervalsByDensity(mergedIntervals, gpsPoints, driftConfig) {
+  return mergedIntervals.map((interval, index) => {
+    const gpsStartIndex = Math.max(0, Math.min(gpsPoints.length - 1, interval.startIndex));
+    const gpsEndIndex = Math.max(
+      gpsStartIndex,
+      Math.min(gpsPoints.length - 1, interval.endIndex + 2)
+    );
+    const stopSegmentPoints = gpsPoints.slice(gpsStartIndex, gpsEndIndex + 1);
+    const sampledPoints = samplePointsUniformly(
+      stopSegmentPoints,
+      driftConfig.densitySampleTriggerCount,
+      driftConfig.densityMaxPoints
+    );
+    const dbscanResult = runDbscan(sampledPoints, driftConfig.densityEpsMeters, driftConfig.densityMinPts);
+    const densityMetrics = buildDensityScore(sampledPoints, dbscanResult);
+    return {
+      intervalId: interval.id || index + 1,
+      interval,
+      pointCount: stopSegmentPoints.length,
+      sampledPointCount: sampledPoints.length,
+      densityMetrics,
+      keepAsStop: densityMetrics.densityScore >= driftConfig.densityScoreThreshold
+    };
+  });
 }
 
 /**

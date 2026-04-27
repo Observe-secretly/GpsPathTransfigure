@@ -4,59 +4,7 @@
         <TrajectoryPanel :mode="trajectoryViewMode" :collapsed="isSidePanelCollapsed" :segments="segmentInfoData"
             @changeMode="setTrajectoryViewMode" @toggleCollapsed="toggleSidePanel" />
 
-        <button class="turnangle-debug-button" type="button" @click="toggleTurnAngleDebug">
-            调试数据
-        </button>
-
-        <div
-            v-if="turnAngleDebugVisible"
-            class="turnangle-debug-window"
-            :style="{ left: `${turnAngleDebugPos.x}px`, top: `${turnAngleDebugPos.y}px` }"
-        >
-            <div class="turnangle-debug-header" @mousedown="startTurnAngleDrag">
-                <div class="turnangle-debug-title">转角调试（turnAngleSeries）</div>
-                <button class="turnangle-debug-close" type="button" @click="turnAngleDebugVisible = false">×</button>
-            </div>
-            <div class="turnangle-debug-body">
-                <div class="turnangle-chart-card">
-                    <div class="turnangle-chart-title">规则阈值合并+30分钟过滤后区间（主参考）</div>
-                    <div class="turnangle-chart-box">
-                        <TurnAngleChart
-                            :data="turnAngleSeries"
-                            valueKey="turnAngle"
-                            colorKey="driftMergedColor"
-                            fallbackColorKey="displayColor"
-                            :yMin="-180"
-                            :yMax="180"
-                        />
-                    </div>
-                </div>
-                <div class="turnangle-chart-card">
-                    <div class="turnangle-chart-title">规则阈值原始识别区间（对照）</div>
-                    <div class="turnangle-chart-box">
-                        <TurnAngleChart
-                            :data="turnAngleSeries"
-                            valueKey="turnAngle"
-                            colorKey="displayColor"
-                            fallbackColorKey="displayColor"
-                            :yMin="-180"
-                            :yMax="180"
-                        />
-                    </div>
-                </div>
-                <div class="turnangle-chart-card">
-                    <div class="turnangle-chart-title">规则漂移分数（driftScore，值越高越可能是漂移候选）</div>
-                    <div class="turnangle-chart-box">
-                        <TurnAngleChart
-                            :data="turnAngleSeries"
-                            valueKey="driftScore"
-                            colorKey="driftMergedColor"
-                            fallbackColorKey="displayColor"
-                        />
-                    </div>
-                </div>
-            </div>
-        </div>
+        <StopPointDebugPanel :turnAngleSeries="turnAngleSeries" />
 
         <div class="map-legend">
             <div class="legend-item">
@@ -94,9 +42,9 @@
 
 </template>
 <script setup>
-    import { ref, onMounted, onUnmounted, watch } from 'vue';
+    import { ref, onMounted, watch } from 'vue';
     import TrajectoryPanel from './component/TrajectoryPanel.vue';
-    import TurnAngleChart from './component/TurnAngleChart.vue';
+    import StopPointDebugPanel from './component/StopPointDebugPanel.vue';
     import ProgressChart from './component/ProgressChart.vue';
     import GpsPathTransfigure from "/index.js"
     import chroma from "chroma-js";
@@ -130,13 +78,7 @@
     let optimizedTrajectoryPoints = []
     let optimizedLineSymbol = null
 
-    // turnAngle 调试数据
     const turnAngleSeries = ref([])
-    const turnAngleDebugVisible = ref(false)
-    const turnAngleDebugPos = ref({ x: 12, y: 80 })
-    let isTurnAngleDragging = false
-    let turnAngleDragOffset = { x: 0, y: 0 }
-
 
     const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
     const script = document.createElement('script');
@@ -241,40 +183,6 @@
 
   function toggleSidePanel(collapsed){
     isSidePanelCollapsed.value = collapsed
-  }
-
-  function formatRatio(value) {
-    if (value === null || value === undefined) {
-      return '-'
-    }
-    return `${(value * 100).toFixed(2)}%`
-  }
-
-  function toggleTurnAngleDebug() {
-    turnAngleDebugVisible.value = !turnAngleDebugVisible.value
-  }
-
-  function startTurnAngleDrag(e) {
-    isTurnAngleDragging = true
-    turnAngleDragOffset = {
-      x: e.clientX - turnAngleDebugPos.value.x,
-      y: e.clientY - turnAngleDebugPos.value.y
-    }
-    e.preventDefault()
-  }
-
-  function onTurnAngleDragMove(e) {
-    if (!isTurnAngleDragging) return
-    const nextX = e.clientX - turnAngleDragOffset.x
-    const nextY = e.clientY - turnAngleDragOffset.y
-    turnAngleDebugPos.value = {
-      x: Math.max(8, nextX),
-      y: Math.max(8, nextY)
-    }
-  }
-
-  function onTurnAngleDragEnd() {
-    isTurnAngleDragging = false
   }
 
   function clearOptimizedPolylines(){
@@ -437,10 +345,10 @@
         for (var i = 0; i <antResults.data[0].locations.length; i++) {
             var item = antResults.data[0].locations[i]
             if(isPointsSwitch.value){
-                var wgs84Point = gcj02towgs84(item.longitude1,item.latitude1)
-                pathParam[i]={lng: wgs84Point[0],lat: wgs84Point[1],currentTime:item.currentTime}
+                var wgs84Point = gcj02towgs84(item.lo,item.la)
+                pathParam[i]={lng: wgs84Point[0],lat: wgs84Point[1],currentTime:item.t}
             }else{
-                pathParam[i]={lng: item.longitude1,lat: item.latitude1,currentTime:item.currentTime}
+                pathParam[i]={lng: item.lo,lat: item.la,currentTime:item.t}
             }
            
             
@@ -547,111 +455,10 @@
         setTimeout(function(){
             initMap()
         },1000)
-        window.addEventListener('mousemove', onTurnAngleDragMove)
-        window.addEventListener('mouseup', onTurnAngleDragEnd)
-    })
-
-    onUnmounted(() => {
-      window.removeEventListener('mousemove', onTurnAngleDragMove)
-      window.removeEventListener('mouseup', onTurnAngleDragEnd)
     })
 </script>
 
 <style scoped>
-.turnangle-debug-button {
-  position: fixed;
-  top: 16px;
-  right: 16px;
-  z-index: 1020;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 12px;
-  padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.92);
-  color: #1f1f1f;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  user-select: none;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-}
-
-.turnangle-debug-button:hover {
-  background: rgba(255, 255, 255, 0.98);
-}
-
-.turnangle-debug-window {
-  position: fixed;
-  width: calc(100vw - 120px);
-  height: 78vh;
-  z-index: 1030;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(10px);
-  resize: both;
-  min-width: 480px;
-  min-height: 320px;
-  max-width: calc(100vw - 120px);
-  max-height: calc(100vh - 120px);
-}
-
-.turnangle-debug-header {
-  height: 38px;
-  background: rgba(0, 0, 0, 0.72);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 10px;
-  cursor: move;
-  user-select: none;
-}
-
-.turnangle-debug-title {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.turnangle-debug-close {
-  border: none;
-  background: transparent;
-  color: #fff;
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 6px;
-}
-
-.turnangle-debug-body {
-  height: calc(100% - 38px);
-  background: rgba(255, 255, 255, 0.15);
-  padding: 10px;
-  overflow: auto;
-}
-
-.turnangle-chart-card {
-  margin-bottom: 10px;
-}
-
-.turnangle-chart-card:last-child {
-  margin-bottom: 0;
-}
-
-.turnangle-chart-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: #2f2f2f;
-  margin-bottom: 6px;
-}
-
-.turnangle-chart-box {
-  height: 180px;
-  border-radius: 10px;
-  overflow: hidden;
-}
-
 .map-legend {
   position: absolute;
   bottom: 100px;
