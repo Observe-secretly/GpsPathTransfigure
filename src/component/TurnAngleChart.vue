@@ -92,7 +92,10 @@ const TOOLTIP_DETAIL_KEYS = [
   'windowLowSpeedRatioPct',
   'windowRawSpeedMedian',
   'isLowSpeedCandidate',
-  'candidateReason'
+  'candidateReason',
+  'isMotionRejected',
+  'motionRejectReason',
+  'motionRejectIntervalId'
 ]
 
 const hoverInfo = ref({

@@ -80,8 +80,18 @@ var config={
 
     // ------------------------ 低速候选（第一层，与方向漂移并列） ------------------------
     driftObserveLowSpeedCandidateEnabled:true,//是否把「窗口内低速占比」作为候选区间来源（默认开；关闭则与旧版行为一致，仅方向漂移）
-    driftObserveLowSpeedThresholdKmh:5,//原始速度低于等于该值（km/h，来自 p 解析）视为低速采样点
-    driftObserveLowSpeedRatioThreshold:0.7,//窗口内低速点占比达到该值则该转角索引命中低速候选
+    driftObserveLowSpeedThresholdKmh:3,//原始速度低于等于该值（km/h，来自 p 解析）视为低速采样点
+    driftObserveLowSpeedRatioThreshold:0.8,//窗口内低速点占比达到该值则该转角索引命中低速候选
+
+    // ------------------------ 运动反证（第二层） ------------------------
+    driftObserveMotionRejectEnabled:true,//是否启用“高质量稳定运动反证”，命中则释放停留候选区间
+    driftObserveMotionRejectMedianSpeedKmh:8,//区间原始速度中位数 >= 该值时，才可能触发运动反证
+    driftObserveMotionRejectStableSpeedMaxMadKmh:2,//速度稳定性：区间速度 MAD <= 该值
+    driftObserveMotionRejectStableDirectionMaxMadDeg:20,//方向稳定性：区间方向“环形 MAD” <= 该值
+    driftObserveMotionRejectGoodHdopMax:3,//质量门控：hdop <= 该值视为好
+    driftObserveMotionRejectGoodVdopMax:5,//质量门控：vdop <= 该值视为好
+    driftObserveMotionRejectMinSatelliteCount:6,//质量门控：卫星数 >= 该值视为好
+    driftObserveMotionRejectQualityRatioThreshold:0.7,//好质量点占比 >= 该值才允许触发反证
 }
 
 /**
@@ -289,7 +299,15 @@ function resolveDriftObservationConfig() {
     densityScoreEnabled: config.driftObserveDensityScoreEnabled !== false,
     lowSpeedCandidateEnabled: config.driftObserveLowSpeedCandidateEnabled !== false,
     lowSpeedThresholdKmh: config.driftObserveLowSpeedThresholdKmh,
-    lowSpeedRatioThreshold: config.driftObserveLowSpeedRatioThreshold
+    lowSpeedRatioThreshold: config.driftObserveLowSpeedRatioThreshold,
+    motionRejectEnabled: config.driftObserveMotionRejectEnabled !== false,
+    motionRejectMedianSpeedKmh: config.driftObserveMotionRejectMedianSpeedKmh,
+    motionRejectStableSpeedMaxMadKmh: config.driftObserveMotionRejectStableSpeedMaxMadKmh,
+    motionRejectStableDirectionMaxMadDeg: config.driftObserveMotionRejectStableDirectionMaxMadDeg,
+    motionRejectGoodHdopMax: config.driftObserveMotionRejectGoodHdopMax,
+    motionRejectGoodVdopMax: config.driftObserveMotionRejectGoodVdopMax,
+    motionRejectMinSatelliteCount: config.driftObserveMotionRejectMinSatelliteCount,
+    motionRejectQualityRatioThreshold: config.driftObserveMotionRejectQualityRatioThreshold
   };
 }
 
@@ -529,6 +547,125 @@ function mergeDirectionAndLowSpeedCandidateIntervals(
       sources
     };
   });
+}
+
+function calculateMedian(values) {
+  const valid = (values || []).filter(v => Number.isFinite(v)).sort((a, b) => a - b);
+  if (!valid.length) return null;
+  const mid = Math.floor(valid.length / 2);
+  return valid.length % 2 ? valid[mid] : (valid[mid - 1] + valid[mid]) / 2;
+}
+
+function calculateMad(values, centerValue) {
+  const valid = (values || []).filter(v => Number.isFinite(v));
+  if (!valid.length) return null;
+  const center = Number.isFinite(centerValue) ? centerValue : calculateMedian(valid);
+  if (center == null) return null;
+  const deviations = valid.map(v => Math.abs(v - center));
+  return calculateMedian(deviations);
+}
+
+function normalizeHeading360(deg) {
+  const v = Number(deg);
+  if (!Number.isFinite(v)) return null;
+  const normalized = ((v % 360) + 360) % 360;
+  return normalized;
+}
+
+function circularMeanDeg(headingsDeg) {
+  const vals = (headingsDeg || []).map(normalizeHeading360).filter(v => v !== null);
+  if (!vals.length) return null;
+  let sinSum = 0;
+  let cosSum = 0;
+  vals.forEach(d => {
+    const r = (d * Math.PI) / 180;
+    sinSum += Math.sin(r);
+    cosSum += Math.cos(r);
+  });
+  const angle = Math.atan2(sinSum / vals.length, cosSum / vals.length);
+  const deg = (angle * 180) / Math.PI;
+  return normalizeHeading360(deg);
+}
+
+function circularAbsDiffDeg(aDeg, bDeg) {
+  const a = normalizeHeading360(aDeg);
+  const b = normalizeHeading360(bDeg);
+  if (a == null || b == null) return null;
+  const diff = Math.abs(a - b);
+  return Math.min(diff, 360 - diff);
+}
+
+function circularMadDeg(headingsDeg) {
+  const mean = circularMeanDeg(headingsDeg);
+  if (mean == null) return null;
+  const diffs = (headingsDeg || [])
+    .map(h => circularAbsDiffDeg(h, mean))
+    .filter(v => Number.isFinite(v));
+  return calculateMedian(diffs);
+}
+
+/**
+ * 运动反证区间指标计算：速度、方向稳定性 + GPS质量占比 + p解析占比。
+ * @param {{startIndex:number,endIndex:number,sources?:string[]}} range turnAngle 索引区间
+ * @param {Array<any>} gpsPoints 原始点
+ * @param {ReturnType<typeof resolveDriftObservationConfig>} driftConfig
+ * @returns {{
+ *   medianRawSpeed:number|null,
+ *   speedMad:number|null,
+ *   directionMad:number|null,
+ *   goodQualityRatio:number|null,
+ *   pParseRatio:number|null
+ * }}
+ */
+function buildMotionRejectMetrics(range, gpsPoints, driftConfig) {
+  const start = Math.max(0, range.startIndex);
+  const end = Math.max(start, range.endIndex);
+  const speeds = [];
+  const headings = [];
+  let qualityCount = 0;
+  let qualityTotal = 0;
+  let parseOk = 0;
+  let parseTotal = 0;
+
+  for (let ti = start; ti <= end; ti++) {
+    const gi = ti + 1;
+    if (gi < 0 || gi >= gpsPoints.length) continue;
+    const p = gpsPoints[gi];
+    const rs = p?.rawSpeed;
+    const rd = p?.rawDirection;
+    if (Number.isFinite(rs)) speeds.push(rs);
+    if (Number.isFinite(rd)) headings.push(rd);
+
+    if (p && p.p !== undefined && p.p !== null && String(p.p).trim() !== "") parseTotal++;
+    if (p && p.pParseOk) parseOk++;
+
+    const hdop = p?.hdop;
+    const vdop = p?.vdop;
+    const sat = p?.satelliteCount;
+    if (Number.isFinite(hdop) && Number.isFinite(vdop) && Number.isFinite(sat)) {
+      qualityTotal++;
+      if (
+        hdop <= driftConfig.motionRejectGoodHdopMax &&
+        vdop <= driftConfig.motionRejectGoodVdopMax &&
+        sat >= driftConfig.motionRejectMinSatelliteCount
+      ) {
+        qualityCount++;
+      }
+    }
+  }
+
+  const medianRawSpeed = calculateMedian(speeds);
+  const speedMad = calculateMad(speeds, medianRawSpeed);
+  const directionMad = circularMadDeg(headings);
+  const goodQualityRatio = qualityTotal ? qualityCount / qualityTotal : null;
+  const pParseRatio = parseTotal ? parseOk / parseTotal : null;
+  return {
+    medianRawSpeed,
+    speedMad,
+    directionMad,
+    goodQualityRatio,
+    pParseRatio
+  };
 }
 
 /**
@@ -970,6 +1107,66 @@ function observeStopPointDirectionDrift(gpsPoints) {
     );
   }
 
+  // 第4.5步：运动反证过滤（第二层）。高质量稳定运动不应被固定为停留点。
+  const motionRejectedIntervals = [];
+  const motionKeptIntervals = [];
+  const motionRejectRows = [];
+  if (driftConfig.motionRejectEnabled) {
+    driftIntervals.forEach((interval, idx) => {
+      const metrics = buildMotionRejectMetrics(interval, gpsPoints, driftConfig);
+      const pParseRatio = metrics.pParseRatio;
+      const goodQualityRatio = metrics.goodQualityRatio;
+      const rejected = (
+        metrics.medianRawSpeed != null &&
+        metrics.medianRawSpeed >= driftConfig.motionRejectMedianSpeedKmh &&
+        metrics.speedMad != null &&
+        metrics.speedMad <= driftConfig.motionRejectStableSpeedMaxMadKmh &&
+        metrics.directionMad != null &&
+        metrics.directionMad <= driftConfig.motionRejectStableDirectionMaxMadDeg &&
+        goodQualityRatio != null &&
+        goodQualityRatio >= driftConfig.motionRejectQualityRatioThreshold &&
+        // 解析比例太低时不做反证，避免“没数据误放行”
+        (pParseRatio == null || pParseRatio >= 0.5)
+      );
+      const reason = rejected ? "high_speed_stable_good_quality" : "";
+      const keep = !rejected;
+      if (keep) {
+        motionKeptIntervals.push(interval);
+      } else {
+        motionRejectedIntervals.push({
+          ...interval,
+          id: motionRejectedIntervals.length + 1,
+          motionRejectReason: reason
+        });
+      }
+
+      const snap = buildIntervalSnapshot(interval);
+      motionRejectRows.push({
+        idx: idx + 1,
+        source: deriveIntervalSourceLabel(interval.sources),
+        startIndex: interval.startIndex,
+        endIndex: interval.endIndex,
+        startTime: snap?.startTime || null,
+        endTime: snap?.endTime || null,
+        durationMinutes: snap ? Number((snap.durationMs / 60000).toFixed(2)) : null,
+        medianRawSpeed: metrics.medianRawSpeed != null ? Number(metrics.medianRawSpeed.toFixed(2)) : null,
+        speedMad: metrics.speedMad != null ? Number(metrics.speedMad.toFixed(2)) : null,
+        directionMad: metrics.directionMad != null ? Number(metrics.directionMad.toFixed(2)) : null,
+        goodQualityRatio: goodQualityRatio != null ? Number(goodQualityRatio.toFixed(4)) : null,
+        pParseRatio: pParseRatio != null ? Number(pParseRatio.toFixed(4)) : null,
+        rejected,
+        reason
+      });
+    });
+  } else {
+    motionKeptIntervals.push(...driftIntervals);
+  }
+
+  if (driftConfig.motionRejectEnabled) {
+    console.log("运动反证区间对照");
+    console.table(motionRejectRows);
+  }
+
   // displayColor / isDriftCandidate 仍只反映「方向漂移」原始识别，便于对照。
   const driftColorByIndex = Array(turnAngleSeries.length).fill(driftConfig.normalColor);
   const driftIntervalIdByIndex = Array(turnAngleSeries.length).fill(null);
@@ -981,7 +1178,7 @@ function observeStopPointDirectionDrift(gpsPoints) {
       }
     }
   });
-  const mergedDriftResult = buildMergedIntervals(driftIntervals);
+  const mergedDriftResult = buildMergedIntervals(motionKeptIntervals);
   const mergedDriftIntervalsRaw = mergedDriftResult.intervals;
   // 二次判定：对每个停留区间做 DBSCAN 密度打分，低于阈值则释放为普通点。
   // 关掉开关时直接跳过密度打分，所有合并区间都视作有效停留点。
@@ -1057,6 +1254,28 @@ function observeStopPointDirectionDrift(gpsPoints) {
     }
   }
 
+  // 运动反证：把被释放区间映射回 turnAngleSeries（用于面板着色与 tooltip）。
+  const motionRejectColorByIndex = Array(turnAngleSeries.length).fill(driftConfig.normalColor);
+  const motionRejectIntervalIdByIndex = Array(turnAngleSeries.length).fill(null);
+  motionRejectedIntervals.forEach(interval => {
+    for (let i = interval.startIndex; i <= interval.endIndex; i++) {
+      if (i >= 0 && i < turnAngleSeries.length) {
+        motionRejectColorByIndex[i] = interval.color;
+        motionRejectIntervalIdByIndex[i] = interval.id;
+      }
+    }
+  });
+  for (let i = 0; i < turnAngleSeries.length; i++) {
+    turnAngleSeries[i].motionRejectColor = motionRejectColorByIndex[i];
+    turnAngleSeries[i].motionRejectIntervalId = motionRejectIntervalIdByIndex[i];
+    turnAngleSeries[i].isMotionRejected = motionRejectIntervalIdByIndex[i] !== null;
+    if (turnAngleSeries[i].isMotionRejected) {
+      turnAngleSeries[i].motionRejectReason = "high_speed_stable_good_quality";
+    } else {
+      turnAngleSeries[i].motionRejectReason = "";
+    }
+  }
+
   let directionCandidatePoints = 0;
   let lowSpeedCandidatePoints = 0;
   let mergedCandidatePoints = 0;
@@ -1072,13 +1291,16 @@ function observeStopPointDirectionDrift(gpsPoints) {
     lowSpeedCandidateEnabled: driftConfig.lowSpeedCandidateEnabled,
     lowSpeedThresholdKmh: driftConfig.lowSpeedThresholdKmh,
     lowSpeedRatioThreshold: driftConfig.lowSpeedRatioThreshold,
+    motionRejectEnabled: driftConfig.motionRejectEnabled,
+    motionRejectedIntervalCount: motionRejectedIntervals.length,
     withPCount,
     parseOkCount,
     parseSuccessRatio: withPCount ? Number((parseOkCount / withPCount).toFixed(4)) : null,
     directionCandidatePoints,
     lowSpeedCandidatePoints,
     mergedCandidatePoints,
-    lowSpeedOnlyPoints
+    lowSpeedOnlyPoints,
+    motionRejectedPointCount: turnAngleSeries.reduce((c, it) => (it.isMotionRejected ? c + 1 : c), 0)
   };
 
   const spatialRows = (mergedDriftResult.spatialMergedRanges || []).map((r, idx) => {

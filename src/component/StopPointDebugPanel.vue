@@ -52,6 +52,18 @@
             <span class="k">解析成功率</span>
             <span class="v">{{ parseRatioText }}</span>
           </div>
+          <div class="stoppoint-summary-item">
+            <span class="k">运动反证开关</span>
+            <span class="v">{{ summary.motionRejectEnabled ? '开启' : '关闭' }}</span>
+          </div>
+          <div class="stoppoint-summary-item">
+            <span class="k">运动反证释放区间数</span>
+            <span class="v">{{ summary.motionRejectedIntervalCount }}</span>
+          </div>
+          <div class="stoppoint-summary-item">
+            <span class="k">运动反证释放点数</span>
+            <span class="v">{{ summary.motionRejectedPointCount }}</span>
+          </div>
         </div>
       </div>
 
@@ -113,6 +125,17 @@
             fallbackColorKey="displayColor"
             :yMin="0"
             :yMax="100"
+          />
+        </div>
+      </div>
+      <div class="stoppoint-chart-card">
+        <div class="stoppoint-chart-title">运动反证区间（高质量稳定运动释放）</div>
+        <div class="stoppoint-chart-box">
+          <TurnAngleChart
+            :data="turnAngleSeries"
+            valueKey="rawSpeed"
+            colorKey="motionRejectColor"
+            fallbackColorKey="driftMergedColor"
           />
         </div>
       </div>
@@ -248,7 +271,7 @@ onUnmounted(() => {
 }
 
 .stoppoint-debug-body {
-  height: calc(100% - 38px);
+  height: calc(100% - 60px);
   background: rgba(255, 255, 255, 0.15);
   padding: 10px;
   overflow: auto;
