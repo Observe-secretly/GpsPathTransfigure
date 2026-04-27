@@ -6,12 +6,16 @@ import  moment from "moment"
 var config={
     minComparisonPoints : 10, // 【删除】最少比较的点数（旧版静止识别使用，现已切换为规则区间驱动）
     distanceThresholdPercentage : 70, // 【删除】距离阈值内的点的百分比（旧版静止识别使用）
-    distanceThreshold : 35, // 距离阈值，单位为米
+    distanceThreshold : 35, // 【删除】距离阈值，单位为米
     stationaryEndPoints : 10, // 【删除】判断静止状态结束的连续点数（旧版静止识别使用）
     limitStopPointTime : 10,// 【删除】停留点时间阈值（旧版停留点二次加工使用）
     
     autoOptimize : false, // 【删除】是否开启参数自动优化
     autoOptimizeMaxCount : 10,// 【删除】自动优化调整次数
+
+    proximityStopThreshold:45,// 【删除】近距离停留点距离阈值。此值通常要大于等于distanceThreshold
+    proximityStopTimeInterval:60,// 【删除】近距离停留点时间间隔阈值。单位分钟
+    proximityStopMerge:true,// 【删除】近距离停留点合并。建议默认开启
     
     abnormalPointRatio:0.05,//异常点占比阈值。若异常点占比超过此值，则会被认为是异常点识别功能失效或不适合此轨迹
     IQRThreshold:2.5,// 异常值检测阈值。此值通常要大于等于1.5
@@ -19,10 +23,6 @@ var config={
     speedIQRThreshold:0.75,// 速度异常值检测阈值
 
     limitSpeed:150,// 最大速度。单位：千米/小时。两点之间的速度超过此值的gps点不参与计算平均速度
-
-    proximityStopThreshold:45,// 近距离停留点距离阈值。此值通常要大于等于distanceThreshold
-    proximityStopTimeInterval:60,//近距离停留点时间间隔阈值。单位分钟
-    proximityStopMerge:true,// 近距离停留点合并。建议默认开启【删除】
     
     smoothness:false,//是否开启停留点前后点位的轨迹补偿。你必须配置对应的地图密钥。否则无效。开启此项会额外消耗移动端流量，并且轨迹渲染速度也会降低
     smoothnessAvgThreshold:1.6,//轨迹补偿距离倍数阈值。点之间的距离超过平均值的这个倍数后，才会被捕捉到进行轨迹补偿
@@ -1672,14 +1672,6 @@ async function optimize(riginalGpsPoints) {
     abnormalIdentification = true
   }
 
-  // 过滤掉里程小于distanceThreshold*2的异常点下标
-  mileageOutliers = mileageOutliers.filter(index => {
-    return finalPoints[index].mileage > config.distanceThreshold * 2
-  })
-  if(mileageOutliers.length>0){
-    finalPoints = removeIndices(finalPoints,mileageOutliers)
-  }
-
   //因为剔除了异常点所以要再次计算速度和里程。这个计算同时会计算点和点之间的速度与里程。不可以省略
   totalMileage = await calculateSpeedAndMileage(finalPoints)
   
@@ -1895,17 +1887,6 @@ function splitTrajectoryByOutliers(points, outlierIndices) {
 }
 
 /**
- * 从原数组中剔除指定下标的元素
- * @param {Array} arr - 原数组
- * @param {Array<number>} indicesToRemove - 要移除的下标数组
- * @returns {Array} - 新数组（不包含指定下标的元素）
- */
-function removeIndices(arr, indicesToRemove) {
-  const removeSet = new Set(indicesToRemove);
-  return arr.filter((_, index) => !removeSet.has(index));
-}
-
-/**
  * 检测 GPS 数据中 mileage 异常大的点
  * @param {Array} data - GPS 点数组，每个对象包含 lat, lng, currentTime, speed, mileage
  * @param {number} k - IQR 阈值倍数（默认 1.5）
@@ -1944,42 +1925,6 @@ function percentile(sortedNums, p) {
 
   if (upper >= n) return sortedNums[lower];
   return sortedNums[lower] * (1 - weight) + sortedNums[upper] * weight;
-}
-
-/**
- * 计算停留点之间距离最近的另一个停留点距离小于distanceThreshold的占比
- * @param {Array} stopPoints - 包含停留点坐标的数组，每个坐标是一个对象，具有lat和lng属性
- * @returns {Boolean} - 若占比超过一定值则返回true，否则返回false
- */
-function autoAdjustThreshold(stopPoints) {
-  if (!stopPoints || stopPoints.length === 0) {
-      return false;
-  }
-
-  const thresholdDistance = config.distanceThreshold; // 距离阈值，单位：米
-  const thresholdRatio = 0.2; // 占比阈值
-
-  let closePointsCount = 0;
-
-  for (let i = 0; i < stopPoints.length; i++) {
-      let hasClosePoint = false;
-      for (let j = 0; j < stopPoints.length; j++) {
-          if (i !== j) {
-              const distance = calculateDistance(stopPoints[i], stopPoints[j]);
-              if (distance <= thresholdDistance) {
-                  hasClosePoint = true;
-                  break;
-              }
-          }
-      }
-      if (hasClosePoint) {
-          closePointsCount++;
-      }
-  }
-
-  const ratio = closePointsCount / stopPoints.length;
-
-  return ratio > thresholdRatio;
 }
 
 /**
