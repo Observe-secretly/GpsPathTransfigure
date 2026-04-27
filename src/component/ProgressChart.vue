@@ -3,6 +3,7 @@
       <canvas id="speed-chart"></canvas>
       <div
         v-if="dynamicMileage!=0"
+        ref="bubbleRef"
         class="bubble"
         :class="{ 'is-moving': isDragging }"
         :style="{ left: `${bubbleLeft}px` }"
@@ -18,7 +19,7 @@
   </template>
   
   <script setup>
-  import { ref, watch, onMounted, onUnmounted } from 'vue';
+  import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue';
   
   // 接收数据
   const props = defineProps({
@@ -51,6 +52,9 @@
             setSliderPositionByIndex(newIndex);
             //计算里程气泡信息用于显示
             calculateTotalMileage(newIndex)
+            nextTick(() => {
+              updateBubblePosition();
+            });
         }
     });
 
@@ -64,6 +68,7 @@
   const dynamicMileage=ref(0);
   const currentPoint=ref({});
   const bubbleLeft = ref(0);
+  const bubbleRef = ref(null);
   
   // 设置画布尺寸和绘制图表
   const updateCanvasSizeAndRender = () => {
@@ -217,6 +222,25 @@
   };
   
   // 更新滑块位置
+  const updateBubblePosition = () => {
+    if (!chartContainer.value || !slider.value) {
+      return;
+    }
+
+    const containerRect = chartContainer.value.getBoundingClientRect();
+    const sliderCenterX = slider.value.offsetLeft + slider.value.offsetWidth / 2;
+    const desiredCenterInViewport = containerRect.left + sliderCenterX;
+    const bubbleWidth = bubbleRef.value?.offsetWidth || 150;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const safeMargin = 8;
+    const minCenter = safeMargin + bubbleWidth / 2;
+    const maxCenter = viewportWidth - safeMargin - bubbleWidth / 2;
+    const clampedCenterInViewport = maxCenter < minCenter
+      ? viewportWidth / 2
+      : Math.max(minCenter, Math.min(desiredCenterInViewport, maxCenter));
+    bubbleLeft.value = clampedCenterInViewport - containerRect.left;
+  };
+
   const updateSliderPosition = (x) => {
     if (!chartContainer.value || !slider.value) {
       return;
@@ -238,21 +262,35 @@
   
     closestX = Math.max(0, Math.min(closestX, chartContainer.value.offsetWidth - slider.value.offsetWidth));
     slider.value.style.left = closestX + 'px';
-    bubbleLeft.value = closestX + slider.value.offsetWidth / 2;
+    updateBubblePosition();
   };
   
   // 滑块拖动功能
   const isDragging = ref(false);
+  const getClientX = (e) => {
+    if (e.touches?.length) {
+      return e.touches[0].clientX;
+    }
+    if (e.changedTouches?.length) {
+      return e.changedTouches[0].clientX;
+    }
+    return e.clientX;
+  };
   
   const startDragging = (e) => {
+    if (e.cancelable) {
+      e.preventDefault();
+    }
     isDragging.value = true;
-    e.preventDefault();
   };
   
   const drag = (e) => {
     if (isDragging.value && chartContainer.value && slider.value) {
+        if (e.cancelable) {
+          e.preventDefault();
+        }
         let rect = chartContainer.value.getBoundingClientRect();
-        let x = e.clientX - rect.left;
+        let x = getClientX(e) - rect.left;
         x = Math.max(0, Math.min(x, chartContainer.value.offsetWidth - slider.value.offsetWidth));
         updateSliderPosition(x);
 
@@ -270,8 +308,11 @@
       if (!chartContainer.value || !slider.value) {
         return;
       }
+      if (e.cancelable) {
+        e.preventDefault();
+      }
       let rect = chartContainer.value.getBoundingClientRect();
-      let x = e.clientX - rect.left;
+      let x = getClientX(e) - rect.left;
       x = Math.max(0, Math.min(x, chartContainer.value.offsetWidth - slider.value.offsetWidth));
       updateSliderPosition(x);
 
@@ -302,6 +343,9 @@
 
             // 调用回调函数并传递当前下标
             callback(closestIndex);
+            nextTick(() => {
+              updateBubblePosition();
+            });
         }
     };
 
@@ -354,6 +398,9 @@
     watch(() => props.data, (newData) => {
         if (newData.length && chartContainer.value && canvas.value && slider.value && ctx.value) {
             updateCanvasSizeAndRender();
+            nextTick(() => {
+              updateBubblePosition();
+            });
         }
     }, { immediate: true });
   
@@ -370,9 +417,14 @@
 
     window.addEventListener('resize', updateCanvasSizeAndRender);
     slider.value.addEventListener('mousedown', startDragging);
+    slider.value.addEventListener('touchstart', startDragging, { passive: false });
     document.addEventListener('mousemove', drag);
+    document.addEventListener('touchmove', drag, { passive: false });
     document.addEventListener('mouseup', stopDragging);
+    document.addEventListener('touchend', stopDragging);
+    document.addEventListener('touchcancel', stopDragging);
     chartContainer.value.addEventListener('mousedown', moveSliderOnClick);
+    chartContainer.value.addEventListener('touchstart', moveSliderOnClick, { passive: false });
 
     // 如果数据在挂载时已经准备好，则立即更新
     if (props.data.length) {
@@ -384,11 +436,16 @@
     window.removeEventListener('resize', updateCanvasSizeAndRender);
     if (slider.value) {
       slider.value.removeEventListener('mousedown', startDragging);
+      slider.value.removeEventListener('touchstart', startDragging);
     }
     document.removeEventListener('mousemove', drag);
+    document.removeEventListener('touchmove', drag);
     document.removeEventListener('mouseup', stopDragging);
+    document.removeEventListener('touchend', stopDragging);
+    document.removeEventListener('touchcancel', stopDragging);
     if (chartContainer.value) {
       chartContainer.value.removeEventListener('mousedown', moveSliderOnClick);
+      chartContainer.value.removeEventListener('touchstart', moveSliderOnClick);
     }
   });
   </script>
@@ -430,6 +487,7 @@
         border-radius: 999px;
         box-shadow: 0 8px 16px rgba(0, 0, 0, 0.25);
         transition: background-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+        touch-action: none;
     }
   .slider:active {
     background: rgba(255, 255, 255, 0.2);
