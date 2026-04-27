@@ -13,6 +13,48 @@
       <button class="stoppoint-debug-close" type="button" @click="debugVisible = false">×</button>
     </div>
     <div class="stoppoint-debug-body">
+      <div v-if="summary" class="stoppoint-summary">
+        <div class="stoppoint-summary-title">候选识别摘要</div>
+        <div class="stoppoint-summary-grid">
+          <div class="stoppoint-summary-item">
+            <span class="k">低速候选开关</span>
+            <span class="v">{{ summary.lowSpeedCandidateEnabled ? '开启' : '关闭' }}</span>
+          </div>
+          <div class="stoppoint-summary-item">
+            <span class="k">速度阈值 km/h</span>
+            <span class="v">{{ summary.lowSpeedThresholdKmh }}</span>
+          </div>
+          <div class="stoppoint-summary-item">
+            <span class="k">窗口低速占比阈值</span>
+            <span class="v">{{ summary.lowSpeedRatioThreshold }}</span>
+          </div>
+          <div class="stoppoint-summary-item">
+            <span class="k">方向候选点数</span>
+            <span class="v">{{ summary.directionCandidatePoints }}</span>
+          </div>
+          <div class="stoppoint-summary-item">
+            <span class="k">低速候选点数</span>
+            <span class="v">{{ summary.lowSpeedCandidatePoints }}</span>
+          </div>
+          <div class="stoppoint-summary-item">
+            <span class="k">合并后停留候选点数</span>
+            <span class="v">{{ summary.mergedCandidatePoints }}</span>
+          </div>
+          <div class="stoppoint-summary-item">
+            <span class="k">低速新增点数</span>
+            <span class="v">{{ summary.lowSpeedOnlyPoints }}</span>
+          </div>
+          <div class="stoppoint-summary-item">
+            <span class="k">带 p 点数 / 解析成功</span>
+            <span class="v">{{ summary.withPCount }} / {{ summary.parseOkCount }}</span>
+          </div>
+          <div class="stoppoint-summary-item">
+            <span class="k">解析成功率</span>
+            <span class="v">{{ parseRatioText }}</span>
+          </div>
+        </div>
+      </div>
+
       <div class="stoppoint-chart-card">
         <div class="stoppoint-chart-title">规则阈值合并+30分钟过滤后区间（主参考）</div>
         <div class="stoppoint-chart-box">
@@ -50,16 +92,49 @@
           />
         </div>
       </div>
+      <div class="stoppoint-chart-card">
+        <div class="stoppoint-chart-title">原始速度 rawSpeed（来自 p，km/h）</div>
+        <div class="stoppoint-chart-box">
+          <TurnAngleChart
+            :data="turnAngleSeries"
+            valueKey="rawSpeed"
+            colorKey="driftMergedColor"
+            fallbackColorKey="displayColor"
+          />
+        </div>
+      </div>
+      <div class="stoppoint-chart-card">
+        <div class="stoppoint-chart-title">窗口低速占比 windowLowSpeedRatio（0~100%）</div>
+        <div class="stoppoint-chart-box">
+          <TurnAngleChart
+            :data="turnAngleSeries"
+            valueKey="windowLowSpeedRatioPct"
+            colorKey="driftMergedColor"
+            fallbackColorKey="displayColor"
+            :yMin="0"
+            :yMax="100"
+          />
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import TurnAngleChart from './TurnAngleChart.vue';
 
-defineProps({
-  turnAngleSeries: { type: Array, default: () => [] }
+const props = defineProps({
+  turnAngleSeries: { type: Array, default: () => [] },
+  driftObservationMeta: { type: Object, default: null }
+});
+
+const summary = computed(() => props.driftObservationMeta?.driftObservationSummary || null);
+
+const parseRatioText = computed(() => {
+  const s = summary.value;
+  if (!s || s.parseSuccessRatio == null) return '--';
+  return `${(s.parseSuccessRatio * 100).toFixed(1)}%`;
 });
 
 const debugVisible = ref(false);
@@ -177,6 +252,44 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.15);
   padding: 10px;
   overflow: auto;
+}
+
+.stoppoint-summary {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.stoppoint-summary-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1f1f1f;
+  margin-bottom: 8px;
+}
+
+.stoppoint-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 6px 12px;
+  font-size: 11px;
+}
+
+.stoppoint-summary-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #374151;
+}
+
+.stoppoint-summary-item .k {
+  color: #6b7280;
+}
+
+.stoppoint-summary-item .v {
+  font-weight: 600;
+  color: #111827;
 }
 
 .stoppoint-chart-card {

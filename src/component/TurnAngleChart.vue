@@ -13,6 +13,13 @@
     >
       <div class="tooltip-row">时间：{{ hoverInfo.time || '--' }}</div>
       <div class="tooltip-row">值：{{ hoverInfo.valueText }}</div>
+      <div
+        v-for="(line, idx) in hoverInfo.detailLines"
+        :key="idx"
+        class="tooltip-row tooltip-detail"
+      >
+        {{ line }}
+      </div>
     </div>
   </div>
 </template>
@@ -76,12 +83,25 @@ const props = defineProps({
 const containerEl = ref(null)
 const canvasEl = ref(null)
 const ctx = ref(null)
+const TOOLTIP_DETAIL_KEYS = [
+  'rawSpeed',
+  'rawDirection',
+  'hdop',
+  'vdop',
+  'satelliteCount',
+  'windowLowSpeedRatioPct',
+  'windowRawSpeedMedian',
+  'isLowSpeedCandidate',
+  'candidateReason'
+]
+
 const hoverInfo = ref({
   visible: false,
   left: 0,
   top: 0,
   time: '',
-  valueText: '--'
+  valueText: '--',
+  detailLines: []
 })
 const renderMeta = ref({
   series: [],
@@ -95,7 +115,7 @@ const parseSeries = () => {
   // - 对象数组：按 props.valueKey / props.colorKey 提取
   return (props.data || []).map((item, idx) => {
     if (typeof item === 'number') {
-      return { x: idx, y: Number.isFinite(item) ? item : null, color: props.normalColor, timeLabel: '' }
+      return { x: idx, y: Number.isFinite(item) ? item : null, color: props.normalColor, timeLabel: '', rawRow: null }
     }
     const value = item && typeof item === 'object' ? item[props.valueKey] : null
     const color = item && typeof item === 'object'
@@ -104,7 +124,8 @@ const parseSeries = () => {
     const timeLabel = item && typeof item === 'object'
       ? (item.currentTime || item.middleTime || item.toTime || item.fromTime || '')
       : ''
-    return { x: idx, y: Number.isFinite(value) ? value : null, color, timeLabel }
+    const rawRow = item && typeof item === 'object' ? item : null
+    return { x: idx, y: Number.isFinite(value) ? value : null, color, timeLabel, rawRow }
   })
 }
 
@@ -273,7 +294,18 @@ const handleMouseMove = (e) => {
   }
 
   const tooltipWidth = 170
-  const tooltipHeight = 44
+  const detailLines = []
+  const rawRow = point.rawRow
+  if (rawRow && typeof rawRow === 'object') {
+    TOOLTIP_DETAIL_KEYS.forEach((key) => {
+      const v = rawRow[key]
+      if (v === undefined || v === null) return
+      if (typeof v === 'string' && v === '') return
+      const display = typeof v === 'boolean' ? String(v) : v
+      detailLines.push(`${key}: ${display}`)
+    })
+  }
+  const tooltipHeight = 44 + detailLines.length * 16
   const nextLeft = Math.min(
     Math.max(8, localX + 10),
     Math.max(8, rect.width - tooltipWidth - 8)
@@ -288,7 +320,8 @@ const handleMouseMove = (e) => {
     left: nextLeft,
     top: nextTop,
     time: point.timeLabel || '',
-    valueText: Number(point.y).toFixed(4)
+    valueText: Number(point.y).toFixed(4),
+    detailLines
   }
 }
 
@@ -352,6 +385,11 @@ watch(
 
 .tooltip-row {
   white-space: nowrap;
+}
+
+.tooltip-detail {
+  white-space: normal;
+  max-width: 280px;
 }
 </style>
 

@@ -4,7 +4,7 @@
         <TrajectoryPanel :mode="trajectoryViewMode" :collapsed="isSidePanelCollapsed" :segments="segmentInfoData"
             @changeMode="setTrajectoryViewMode" @toggleCollapsed="toggleSidePanel" />
 
-        <StopPointDebugPanel :turnAngleSeries="turnAngleSeries" />
+        <StopPointDebugPanel :turnAngleSeries="turnAngleSeries" :driftObservationMeta="driftObservationMeta" />
 
         <div class="map-legend">
             <div class="legend-item">
@@ -79,6 +79,7 @@
     let optimizedLineSymbol = null
 
     const turnAngleSeries = ref([])
+    const driftObservationMeta = ref(null)
 
     const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
     const script = document.createElement('script');
@@ -346,9 +347,9 @@
             var item = antResults.data[0].locations[i]
             if(isPointsSwitch.value){
                 var wgs84Point = gcj02towgs84(item.lo,item.la)
-                pathParam[i]={lng: wgs84Point[0],lat: wgs84Point[1],currentTime:item.t}
+                pathParam[i]={lng: wgs84Point[0],lat: wgs84Point[1],currentTime:item.t,p:item.p}
             }else{
-                pathParam[i]={lng: item.lo,lat: item.la,currentTime:item.t}
+                pathParam[i]={lng: item.lo,lat: item.la,currentTime:item.t,p:item.p}
             }
            
             
@@ -364,13 +365,14 @@
             pathColorOptimize:true,
         })
         const staticPoints = await GpsPathTransfigure.optimize(pathParam);
-        const { finalPoints, stopPoints,trajectoryPoints,center, zoom ,segmentInfo,startPoint,endPoint,moveAvgSpeed:move_avg_speed,avgSpeed: speed_avg,totalMileage: mileage_total,samplePoints,turnAngleSeries:turn_angle_series} = staticPoints;
+        const { finalPoints, stopPoints,trajectoryPoints,center, zoom ,segmentInfo,startPoint,endPoint,moveAvgSpeed:move_avg_speed,avgSpeed: speed_avg,totalMileage: mileage_total,samplePoints,turnAngleSeries:turn_angle_series, driftObservationMeta: drift_observation_meta} = staticPoints;
         moveAvgSpeed.value = move_avg_speed
         avgSpeed.value = speed_avg
         totalMileage.value = Number((mileage_total/1000).toFixed(2));
         segmentInfoData.value = segmentInfo
         playPoints = finalPoints
         turnAngleSeries.value = Array.isArray(turn_angle_series) ? turn_angle_series : []
+        driftObservationMeta.value = drift_observation_meta || null
         const { Map } = await google.maps.importLibrary("maps");
         const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
 

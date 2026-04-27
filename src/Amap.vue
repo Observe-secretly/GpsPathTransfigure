@@ -4,7 +4,7 @@
     <TrajectoryPanel :mode="trajectoryViewMode" :collapsed="isSidePanelCollapsed" :segments="segmentInfoData"
       @changeMode="setTrajectoryViewMode" @toggleCollapsed="toggleSidePanel" />
 
-    <StopPointDebugPanel :turnAngleSeries="turnAngleSeries" />
+    <StopPointDebugPanel :turnAngleSeries="turnAngleSeries" :driftObservationMeta="driftObservationMeta" />
 
     <div class="map-legend">
       <div class="legend-item">
@@ -76,6 +76,7 @@ let rawPathPoints = []
 let stopMarker = []
 
 const turnAngleSeries = ref([])
+const driftObservationMeta = ref(null)
 
 const jsApiKey = import.meta.env.VITE_AMAP_JS_API_KEY;
 const webApiKey = import.meta.env.VITE_AMAP_WEB_API_KEY;
@@ -202,7 +203,7 @@ async function initMap() {
       //把item.t时间戳转换成正常的2025-10-20 00:00:01时间格式
       const d = new Date(item.t);
       item.t = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
-      pathParam[i] = { lng: item.lo, lat: item.la, currentTime: item.t }
+      pathParam[i] = { lng: item.lo, lat: item.la, currentTime: item.t, p: item.p }
     }
     rawPathPoints = pathParam
 
@@ -227,7 +228,8 @@ async function initMap() {
       moveAvgSpeed: move_avg_speed,
       avgSpeed: speed_avg,
       totalMileage: mileage_total,
-      turnAngleSeries: turn_angle_series
+      turnAngleSeries: turn_angle_series,
+      driftObservationMeta: drift_observation_meta
     } = staticPoints;
     segmentInfoData.value = segmentInfo
     playPoints = finalPoints
@@ -235,6 +237,7 @@ async function initMap() {
     moveAvgSpeed.value = move_avg_speed
     totalMileage.value = parseFloat(mileage_total / 1000).toFixed(2)
     turnAngleSeries.value = Array.isArray(turn_angle_series) ? turn_angle_series : []
+    driftObservationMeta.value = drift_observation_meta || null
 
     var map = new AMap.Map('amapContainer', {
       resizeEnable: true,

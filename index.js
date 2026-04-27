@@ -77,6 +77,89 @@ var config={
     driftObserveDensityMaxPoints:200,//DBSCAN性能保护：参与聚类的点数上限（超过就采样到最多100个点）
     driftObserveDensityScoreThreshold:0.6,//二次判定阈值：densityScore低于此值就释放为普通点
     driftObserveDensityScoreEnabled:true,//是否开启DBSCAN密度二次判定（关闭后所有时长过滤后的合并区间都直接保留为停留点）
+
+    // ------------------------ 低速候选（第一层，与方向漂移并列） ------------------------
+    driftObserveLowSpeedCandidateEnabled:true,//是否把「窗口内低速占比」作为候选区间来源（默认开；关闭则与旧版行为一致，仅方向漂移）
+    driftObserveLowSpeedThresholdKmh:5,//原始速度低于等于该值（km/h，来自 p 解析）视为低速采样点
+    driftObserveLowSpeedRatioThreshold:0.7,//窗口内低速点占比达到该值则该转角索引命中低速候选
+}
+
+/**
+ * 解析上报点中的 `p`：14 位十六进制串，7 字节 BE。
+ * speed、direction 为 ×10 放大存储，解码后除以 10；其余为单字节整数。
+ * @param {unknown} p
+ * @returns {{
+ *   rawSpeed:number|null,
+ *   rawDirection:number|null,
+ *   hdop:number|null,
+ *   vdop:number|null,
+ *   satelliteCount:number|null,
+ *   pParseOk:boolean
+ * }}
+ */
+function parseGpsExtraPayload(p) {
+  const empty = {
+    rawSpeed: null,
+    rawDirection: null,
+    hdop: null,
+    vdop: null,
+    satelliteCount: null,
+    pParseOk: false
+  };
+  if (p === undefined || p === null) return empty;
+  let hex = String(p).trim().replace(/^0x/i, "");
+  if (!hex.length) return empty;
+  // 兼容奇长：左侧补零凑齐偶数位
+  if (hex.length % 2 !== 0) hex = `0${hex}`;
+  const expectedChars = 14;
+  if (hex.length !== expectedChars) return empty;
+
+  try {
+    const speedInt = parseInt(hex.slice(0, 4), 16);
+    const dirInt = parseInt(hex.slice(4, 8), 16);
+    const hdopByte = parseInt(hex.slice(8, 10), 16);
+    const vdopByte = parseInt(hex.slice(10, 12), 16);
+    const satByte = parseInt(hex.slice(12, 14), 16);
+
+    const rawSpeed = Number.isFinite(speedInt) ? speedInt / 10 : null;
+    const rawDirection = Number.isFinite(dirInt) ? dirInt / 10 : null;
+    const hdop = Number.isFinite(hdopByte) ? hdopByte : null;
+    const vdop = Number.isFinite(vdopByte) ? vdopByte : null;
+    const satelliteCount = Number.isFinite(satByte) ? satByte : null;
+
+    return {
+      rawSpeed,
+      rawDirection,
+      hdop,
+      vdop,
+      satelliteCount,
+      pParseOk: Number.isFinite(rawSpeed) || Number.isFinite(rawDirection)
+    };
+  } catch (_) {
+    return empty;
+  }
+}
+
+/**
+ * 把 `p` 解码字段合并进轨迹点对象，便于后续漂移与调试使用。
+ * @param {Array<Record<string,unknown>>} points
+ * @returns {Array<Record<string,unknown>>}
+ */
+function normalizeGpsPointsWithPayload(points) {
+  if (!Array.isArray(points)) return points;
+  return points.map(point => {
+    if (!point || typeof point !== "object") return point;
+    const decoded = parseGpsExtraPayload(point.p);
+    return {
+      ...point,
+      rawSpeed: decoded.rawSpeed,
+      rawDirection: decoded.rawDirection,
+      hdop: decoded.hdop,
+      vdop: decoded.vdop,
+      satelliteCount: decoded.satelliteCount,
+      pParseOk: decoded.pParseOk
+    };
+  });
 }
 
 
@@ -203,7 +286,10 @@ function resolveDriftObservationConfig() {
     densitySampleTriggerCount: config.driftObserveDensitySampleTriggerCount,
     densityMaxPoints: config.driftObserveDensityMaxPoints,
     densityScoreThreshold: config.driftObserveDensityScoreThreshold,
-    densityScoreEnabled: config.driftObserveDensityScoreEnabled !== false
+    densityScoreEnabled: config.driftObserveDensityScoreEnabled !== false,
+    lowSpeedCandidateEnabled: config.driftObserveLowSpeedCandidateEnabled !== false,
+    lowSpeedThresholdKmh: config.driftObserveLowSpeedThresholdKmh,
+    lowSpeedRatioThreshold: config.driftObserveLowSpeedRatioThreshold
   };
 }
 
@@ -374,6 +460,78 @@ function detectDriftIntervalsBySignal(
 }
 
 /**
+ * 由 sources 数组推导区间来源展示字符串。
+ * @param {string[]|undefined} sources
+ * @returns {'direction'|'low_speed'|'direction+low_speed'}
+ */
+function deriveIntervalSourceLabel(sources) {
+  const set = new Set(sources || []);
+  const hasD = set.has("direction");
+  const hasL = set.has("low_speed");
+  if (hasD && hasL) return "direction+low_speed";
+  if (hasD) return "direction";
+  return "low_speed";
+}
+
+/**
+ * 合并「方向漂移」与「低速候选」在转角索引轴上的区间（重叠或相邻则合并），并重新着色。
+ * @param {Array<{startIndex:number,endIndex:number,id:number,color:string}>} directionIntervals
+ * @param {Array<{startIndex:number,endIndex:number,id:number,color:string}>} lowSpeedIntervals
+ * @param {(usedColors:string[])=>string} pickDistinctRandomColor
+ * @returns {Array<{id:number,startIndex:number,endIndex:number,color:string,source:string,sources:string[]}>}
+ */
+function mergeDirectionAndLowSpeedCandidateIntervals(
+  directionIntervals,
+  lowSpeedIntervals,
+  pickDistinctRandomColor
+) {
+  const usedColors = [];
+  const labeled = [
+    ...(directionIntervals || []).map(iv => ({
+      startIndex: iv.startIndex,
+      endIndex: iv.endIndex,
+      tag: "direction"
+    })),
+    ...(lowSpeedIntervals || []).map(iv => ({
+      startIndex: iv.startIndex,
+      endIndex: iv.endIndex,
+      tag: "low_speed"
+    }))
+  ];
+  if (!labeled.length) return [];
+
+  labeled.sort((a, b) => a.startIndex - b.startIndex);
+  const merged = [];
+  let cur = { ...labeled[0], tags: new Set([labeled[0].tag]) };
+  for (let i = 1; i < labeled.length; i++) {
+    const next = labeled[i];
+    if (next.startIndex <= cur.endIndex + 1) {
+      cur.endIndex = Math.max(cur.endIndex, next.endIndex);
+      cur.tags.add(next.tag);
+    } else {
+      merged.push(cur);
+      cur = { ...next, tags: new Set([next.tag]) };
+    }
+  }
+  merged.push(cur);
+
+  return merged.map((range, idx) => {
+    const sources = Array.from(range.tags);
+    const source = deriveIntervalSourceLabel(sources);
+    const color = pickDistinctRandomColor(usedColors);
+    usedColors.push(color);
+    return {
+      id: idx + 1,
+      startIndex: range.startIndex,
+      endIndex: range.endIndex,
+      color,
+      source,
+      sources
+    };
+  });
+}
+
+/**
  * 观测轨迹里的“方向漂移”信号，主要用于调试和参数验证，不直接改动主业务输出。
  * 你可以把这个方法看成一个“诊断面板生成器”：输入原始 gps 点，输出转角序列、候选区间和阈值元信息。
  * 注意：这个方法的入参/出参是稳定接口，内部即使重构也不应该改外部调用方式。
@@ -448,6 +606,8 @@ function observeStopPointDirectionDrift(gpsPoints) {
       turnAngle: calculateTurnAngle(firstVector, secondVector)
     });
   }
+
+  const turnAngles = turnAngleSeries.map(item => item.turnAngle);
 
   const extractValidNumbers = (values) => values.filter(value => Number.isFinite(value));
   const percentile = (values, quantile) => {
@@ -527,7 +687,11 @@ function observeStopPointDirectionDrift(gpsPoints) {
     return (intervals || [])
       .map(interval => ({
         startIndex: Math.max(0, Math.min(maxIndex, interval.startIndex)),
-        endIndex: Math.max(0, Math.min(maxIndex, interval.endIndex))
+        endIndex: Math.max(0, Math.min(maxIndex, interval.endIndex)),
+        color: interval.color,
+        id: interval.id,
+        source: interval.source,
+        sources: interval.sources
       }))
       .filter(interval => interval.endIndex >= interval.startIndex)
       .sort((a, b) => a.startIndex - b.startIndex);
@@ -575,9 +739,17 @@ function observeStopPointDirectionDrift(gpsPoints) {
       : Number.POSITIVE_INFINITY;
     return distance <= driftConfig.mergeDistanceThresholdMeters && gapMinutes <= driftConfig.mergeGapMaxMinutes;
   };
+  const unionSourceTags = (a, b) => {
+    const out = new Set([...(a || []), ...(b || [])]);
+    return Array.from(out);
+  };
+
   const mergeIntervalRanges = (ranges) => {
     if (!ranges.length) return [];
-    let currentRanges = [...ranges];
+    let currentRanges = ranges.map(r => ({
+      ...r,
+      sources: r.sources || (r.source ? [r.source] : [])
+    }));
     let changed = true;
     while (changed) {
       changed = false;
@@ -588,7 +760,10 @@ function observeStopPointDirectionDrift(gpsPoints) {
         if (canMergeIntervals(current, candidate)) {
           current = {
             startIndex: Math.min(current.startIndex, candidate.startIndex),
-            endIndex: Math.max(current.endIndex, candidate.endIndex)
+            endIndex: Math.max(current.endIndex, candidate.endIndex),
+            color: current.color,
+            id: current.id,
+            sources: unionSourceTags(current.sources, candidate.sources)
           };
           changed = true;
         } else {
@@ -612,13 +787,17 @@ function observeStopPointDirectionDrift(gpsPoints) {
     const usedColors = [];
     return ranges.map((range, index) => {
       const snapshot = buildIntervalSnapshot(range);
-      const color = pickDistinctRandomColor(usedColors);
-      usedColors.push(color);
+      const color = range.color || pickDistinctRandomColor(usedColors);
+      if (!range.color) usedColors.push(color);
+      const sources = range.sources || (range.source ? [range.source] : []);
+      const source = deriveIntervalSourceLabel(sources);
       return {
         id: index + 1,
         startIndex: range.startIndex,
         endIndex: range.endIndex,
         color,
+        source,
+        sources,
         startTime: snapshot?.startTime || null,
         endTime: snapshot?.endTime || null,
         durationMs: snapshot?.durationMs || 0,
@@ -629,6 +808,31 @@ function observeStopPointDirectionDrift(gpsPoints) {
       };
     });
   };
+
+  const computeIntervalRawSpeedStats = (range) => {
+    const start = Math.max(0, range.startIndex);
+    const end = Math.max(start, range.endIndex);
+    const speeds = [];
+    for (let ti = start; ti <= end; ti++) {
+      const gi = ti + 1;
+      if (gi >= 0 && gi < gpsPoints.length) {
+        const v = gpsPoints[gi].rawSpeed;
+        if (Number.isFinite(v)) speeds.push(v);
+      }
+    }
+    if (!speeds.length) {
+      return { avgRawSpeed: null, medianRawSpeed: null, intervalLowSpeedRatio: null };
+    }
+    const sorted = [...speeds].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const medianRawSpeed = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    const avgRawSpeed = speeds.reduce((s, v) => s + v, 0) / speeds.length;
+    const thr = driftConfig.lowSpeedThresholdKmh;
+    const lowN = speeds.filter(s => s <= thr).length;
+    const intervalLowSpeedRatio = lowN / speeds.length;
+    return { avgRawSpeed, medianRawSpeed, intervalLowSpeedRatio };
+  };
+
   const buildMergedIntervals = (rawIntervals) => {
     const normalizedRanges = normalizeIntervalRanges(rawIntervals, turnAngleSeries.length - 1);
     const mergedRanges = mergeIntervalRanges(normalizedRanges);
@@ -637,11 +841,11 @@ function observeStopPointDirectionDrift(gpsPoints) {
       rawCount: normalizedRanges.length,
       mergedCount: mergedRanges.length,
       durationFilteredCount: durationFilteredRanges.length,
-      intervals: toColoredIntervals(durationFilteredRanges)
+      intervals: toColoredIntervals(durationFilteredRanges),
+      spatialMergedRanges: mergedRanges
     };
   };
 
-  const turnAngles = turnAngleSeries.map(item => item.turnAngle);
   const featureSeries = turnAngles.map((_, index) => {
     const { start, end } = getWindowRange(index, turnAngles.length, driftConfig.windowSize);
     const windowValues = turnAngles.slice(start, end + 1);
@@ -697,10 +901,10 @@ function observeStopPointDirectionDrift(gpsPoints) {
     fallbackSignalSeries
   } = thresholdMeta;
 
-  // 第4步：统一走状态机切区间。信号源会按模式自动切换（driftScore 或 |turnAngle|）。
-  const signalSeries = useFallback ? fallbackSignalSeries : driftScoreSeries;
-  const driftIntervals = detectDriftIntervalsBySignal(
-    signalSeries,
+  // 第4步：方向漂移状态机（与旧版一致，仅基于 driftScore 或 |turnAngle|）。
+  const directionSignalSeries = useFallback ? fallbackSignalSeries : driftScoreSeries;
+  const directionDriftIntervals = detectDriftIntervalsBySignal(
+    directionSignalSeries,
     highThreshold,
     lowThreshold,
     driftConfig.startStreak,
@@ -708,9 +912,68 @@ function observeStopPointDirectionDrift(gpsPoints) {
     pickDistinctRandomColor
   );
 
+  // 低速窗口：与 driftScore 使用同一 windowSize；仅在开启低速候选时参与区间合并。
+  const windowLowSpeedRatioSeries = [];
+  const windowRawSpeedMedianSeries = [];
+  const lowThr = driftConfig.lowSpeedThresholdKmh;
+  const ratioThr = driftConfig.lowSpeedRatioThreshold;
+  for (let wi = 0; wi < turnAngles.length; wi++) {
+    const { start: ws, end: we } = getWindowRange(wi, turnAngles.length, driftConfig.windowSize);
+    const speeds = [];
+    for (let j = ws; j <= we; j++) {
+      const gi = j + 1;
+      if (gi >= 0 && gi < gpsPoints.length) {
+        const rs = gpsPoints[gi].rawSpeed;
+        if (Number.isFinite(rs)) speeds.push(rs);
+      }
+    }
+    if (!speeds.length) {
+      windowLowSpeedRatioSeries.push(0);
+      windowRawSpeedMedianSeries.push(null);
+      continue;
+    }
+    const lowCount = speeds.filter(s => s <= lowThr).length;
+    windowLowSpeedRatioSeries.push(lowCount / speeds.length);
+    windowRawSpeedMedianSeries.push(median(speeds));
+  }
+
+  const lowSpeedSignalSeries = driftConfig.lowSpeedCandidateEnabled
+    ? windowLowSpeedRatioSeries.map(r => (r >= ratioThr ? 1 : 0))
+    : windowLowSpeedRatioSeries.map(() => 0);
+
+  const lowSpeedDriftIntervals = driftConfig.lowSpeedCandidateEnabled
+    ? detectDriftIntervalsBySignal(
+      lowSpeedSignalSeries,
+      1,
+      0,
+      driftConfig.startStreak,
+      driftConfig.endStreak,
+      pickDistinctRandomColor
+    )
+    : [];
+
+  let driftIntervals;
+  if (!driftConfig.lowSpeedCandidateEnabled) {
+    driftIntervals = directionDriftIntervals.map(iv => ({
+      id: iv.id,
+      startIndex: iv.startIndex,
+      endIndex: iv.endIndex,
+      color: iv.color,
+      source: "direction",
+      sources: ["direction"]
+    }));
+  } else {
+    driftIntervals = mergeDirectionAndLowSpeedCandidateIntervals(
+      directionDriftIntervals,
+      lowSpeedDriftIntervals,
+      pickDistinctRandomColor
+    );
+  }
+
+  // displayColor / isDriftCandidate 仍只反映「方向漂移」原始识别，便于对照。
   const driftColorByIndex = Array(turnAngleSeries.length).fill(driftConfig.normalColor);
   const driftIntervalIdByIndex = Array(turnAngleSeries.length).fill(null);
-  driftIntervals.forEach(interval => {
+  directionDriftIntervals.forEach(interval => {
     for (let i = interval.startIndex; i <= interval.endIndex; i++) {
       if (i >= 0 && i < turnAngleSeries.length) {
         driftColorByIndex[i] = interval.color;
@@ -746,6 +1009,13 @@ function observeStopPointDirectionDrift(gpsPoints) {
       }
     }
   });
+  let withPCount = 0;
+  let parseOkCount = 0;
+  gpsPoints.forEach(pt => {
+    if (pt && pt.p !== undefined && pt.p !== null && String(pt.p).trim() !== "") withPCount++;
+    if (pt && pt.pParseOk) parseOkCount++;
+  });
+
   for (let i = 0; i < turnAngleSeries.length; i++) {
     turnAngleSeries[i].driftScore = Number(driftScoreSeries[i].toFixed(6));
     turnAngleSeries[i].windowAmp = Number(featureSeries[i].amp.toFixed(6));
@@ -760,7 +1030,82 @@ function observeStopPointDirectionDrift(gpsPoints) {
     turnAngleSeries[i].driftMergedIntervalId = driftMergedIntervalIdByIndex[i];
     turnAngleSeries[i].driftMergedColor = driftMergedColorByIndex[i];
     turnAngleSeries[i].isDriftMergedCandidate = driftMergedIntervalIdByIndex[i] !== null;
+
+    const mid = gpsPoints[i + 1];
+    turnAngleSeries[i].rawSpeed = mid && Number.isFinite(mid.rawSpeed) ? mid.rawSpeed : null;
+    turnAngleSeries[i].rawDirection = mid && Number.isFinite(mid.rawDirection) ? mid.rawDirection : null;
+    turnAngleSeries[i].hdop = mid && Number.isFinite(mid.hdop) ? mid.hdop : null;
+    turnAngleSeries[i].vdop = mid && Number.isFinite(mid.vdop) ? mid.vdop : null;
+    turnAngleSeries[i].satelliteCount = mid && Number.isFinite(mid.satelliteCount) ? mid.satelliteCount : null;
+    turnAngleSeries[i].windowLowSpeedRatio = Number(windowLowSpeedRatioSeries[i].toFixed(6));
+    turnAngleSeries[i].windowLowSpeedRatioPct = Number((windowLowSpeedRatioSeries[i] * 100).toFixed(2));
+    turnAngleSeries[i].windowRawSpeedMedian = windowRawSpeedMedianSeries[i] != null
+      ? Number(windowRawSpeedMedianSeries[i].toFixed(4))
+      : null;
+    const isLowSpeedCandidate = driftConfig.lowSpeedCandidateEnabled
+      && windowLowSpeedRatioSeries[i] >= ratioThr;
+    turnAngleSeries[i].isLowSpeedCandidate = isLowSpeedCandidate;
+    const isDir = driftIntervalIdByIndex[i] !== null;
+    if (isDir && isLowSpeedCandidate) {
+      turnAngleSeries[i].candidateReason = "direction+low_speed";
+    } else if (isDir) {
+      turnAngleSeries[i].candidateReason = "direction";
+    } else if (isLowSpeedCandidate) {
+      turnAngleSeries[i].candidateReason = "low_speed";
+    } else {
+      turnAngleSeries[i].candidateReason = "";
+    }
   }
+
+  let directionCandidatePoints = 0;
+  let lowSpeedCandidatePoints = 0;
+  let mergedCandidatePoints = 0;
+  let lowSpeedOnlyPoints = 0;
+  for (let i = 0; i < turnAngleSeries.length; i++) {
+    if (turnAngleSeries[i].isDriftCandidate) directionCandidatePoints++;
+    if (turnAngleSeries[i].isLowSpeedCandidate) lowSpeedCandidatePoints++;
+    if (turnAngleSeries[i].isDriftMergedCandidate) mergedCandidatePoints++;
+    if (turnAngleSeries[i].isLowSpeedCandidate && !turnAngleSeries[i].isDriftCandidate) lowSpeedOnlyPoints++;
+  }
+
+  const driftObservationSummary = {
+    lowSpeedCandidateEnabled: driftConfig.lowSpeedCandidateEnabled,
+    lowSpeedThresholdKmh: driftConfig.lowSpeedThresholdKmh,
+    lowSpeedRatioThreshold: driftConfig.lowSpeedRatioThreshold,
+    withPCount,
+    parseOkCount,
+    parseSuccessRatio: withPCount ? Number((parseOkCount / withPCount).toFixed(4)) : null,
+    directionCandidatePoints,
+    lowSpeedCandidatePoints,
+    mergedCandidatePoints,
+    lowSpeedOnlyPoints
+  };
+
+  const spatialRows = (mergedDriftResult.spatialMergedRanges || []).map((r, idx) => {
+    const snap = buildIntervalSnapshot(r);
+    const st = computeIntervalRawSpeedStats(r);
+    return {
+      idx: idx + 1,
+      source: deriveIntervalSourceLabel(r.sources),
+      startIndex: r.startIndex,
+      endIndex: r.endIndex,
+      startTime: snap?.startTime || null,
+      endTime: snap?.endTime || null,
+      durationMinutes: snap ? Number((snap.durationMs / 60000).toFixed(2)) : null,
+      avgRawSpeed: st.avgRawSpeed != null ? Number(st.avgRawSpeed.toFixed(2)) : null,
+      medianRawSpeed: st.medianRawSpeed != null ? Number(st.medianRawSpeed.toFixed(2)) : null,
+      intervalLowSpeedRatio: st.intervalLowSpeedRatio != null ? Number(st.intervalLowSpeedRatio.toFixed(4)) : null
+    };
+  });
+
+  console.log("低速候选识别统计", {
+    ...driftObservationSummary,
+    directionIntervalCount: directionDriftIntervals.length,
+    lowSpeedIntervalCount: lowSpeedDriftIntervals.length,
+    combinedIntervalCount: driftIntervals.length
+  });
+  console.log("候选区间来源对照（空间合并后、时长过滤前）");
+  console.table(spatialRows);
 
   console.log("角度漂移观测-向量x轴夹角序列", vectorAngleFromXAxisSeries);
   console.log("角度漂移观测-相邻向量夹角序列", turnAngleSeries);
@@ -787,7 +1132,9 @@ function observeStopPointDirectionDrift(gpsPoints) {
     quantileHighThreshold,
     quantileLowThreshold
   });
-  console.log("角度漂移观测-识别区间", driftIntervals);
+  console.log("角度漂移观测-方向漂移原始识别区间", directionDriftIntervals);
+  console.log("角度漂移观测-低速候选识别区间", lowSpeedDriftIntervals);
+  console.log("角度漂移观测-合并候选区间（方向∪低速，索引轴）", driftIntervals);
   console.log("角度漂移观测-规则区间后处理统计", {
     rawCount: mergedDriftResult.rawCount,
     mergedCount: mergedDriftResult.mergedCount,
@@ -842,7 +1189,8 @@ function observeStopPointDirectionDrift(gpsPoints) {
       highnessGate,
       densityScoreThreshold: driftConfig.densityScoreThreshold,
       densityFilteredCount: mergedDriftIntervals.length,
-      releasedAsNormalCount: releasedMergedIntervalCount
+      releasedAsNormalCount: releasedMergedIntervalCount,
+      driftObservationSummary
     }
   };
 }
@@ -1002,10 +1350,15 @@ function scoreStopIntervalsByDensity(mergedIntervals, gpsPoints, driftConfig) {
  */
 async function optimize(riginalGpsPoints) {
 
-  //去除噪点 
-  let gpsPoints = noiseRecognitionFilter(riginalGpsPoints)
+  let gpsPoints = normalizeGpsPointsWithPayload(riginalGpsPoints);
+  //去除噪点
+  gpsPoints = noiseRecognitionFilter(gpsPoints);
 
-  const {turnAngleSeries, mergedDriftIntervals} = observeStopPointDirectionDrift(gpsPoints)
+  const {
+    turnAngleSeries,
+    mergedDriftIntervals,
+    thresholdMeta: driftObservationMeta
+  } = observeStopPointDirectionDrift(gpsPoints);
 
   // 第一阶段：----------------------------------------------寻找停留点
   var finalPoints = []; // 存储最终的轨迹点（混合语义：普通点保留，停留段替换成质心）
@@ -1180,6 +1533,7 @@ async function optimize(riginalGpsPoints) {
   // 返回处理后的轨迹点数组
   return {
     "turnAngleSeries":turnAngleSeries,
+    driftObservationMeta,
     "finalPoints": finalPoints,//优化后的轨迹
     "trajectoryPoints":trajectoryPoints,//优化后根据速度进行拆分的轨迹信息
     "stopPoints" : stopPoints,//所有的停留点
