@@ -1,6 +1,6 @@
 {
   "name": "gpspathtransfigure",
-  "version": "2.0.0-beta2",
+  "version": "2.0.0",
   "description": "Designed specifically for rendering trajectories of GPS points reported by devices. Optimize GPS coordinate trajectory. Calculate stop points, stay time, exercise time, mileage and other information.",
   "main": "index.js",
   "type": "module",
@@ -34,12 +34,16 @@
     "index.js",
     "lang/i18n.js",
     "package.json",
-    "doc/centerpoint.png",
-    "doc/smoothness.png",
-    "doc/stoppoint.png",
-    "doc/autoOptimize.png",
-    "doc/amap_track.gif",
-    "doc/gmap_track.gif",
-    "src/component/ProgressChart.vue"
+    "doc/debuggingMode.png",
+    "doc/gps_moving_low_noise_1.gif",
+    "doc/gps_moving_low_noise_2.gif",
+    "doc/gps_moving_low_noise_3.gif",
+    "doc/gps_stationary_high_jitter_1.gif",
+    "doc/gps_stationary_high_jitter_2.gif",
+    "doc/gps_stationary_high_jitter_3.gif",
+    "doc/trajectorySegmentation.png",
+    "src/component/ProgressChart.vue",
+    "src/component/StopPointDebugPanel.vue",
+    "src/component/TurnAngleChart.vue"
   ]
 }

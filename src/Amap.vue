@@ -209,13 +209,10 @@ async function initMap() {
 
     GpsPathTransfigure.conf({
       locale: locale,
-      aMapKey: webApiKey,
       defaultMapService: 'amap',
-      openDebug: true,
-      pathColorOptimize: true,
-      samplePointsNum: 300,
     })
     const staticPoints = await GpsPathTransfigure.optimize(pathParam);
+    debugger
     const {
       finalPoints,
       trajectoryPoints,
