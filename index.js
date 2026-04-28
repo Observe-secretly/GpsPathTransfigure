@@ -1,4 +1,4 @@
-import {getI18nValue} from  "./lang/i18n"
+import {getI18nValue} from  "./lang/i18n.js"
 import  moment from "moment"
 
 
@@ -52,10 +52,10 @@ var config={
 
     // ------------------------ 漂移观测（observeStopPointDirectionDrift）参数区 ------------------------
     // 这块是“角度漂移观测”的统一配置。你以后调参，优先改这里，不用进函数里找常量。
-    driftObserveWindowSize:40,//窗口大小（滑动窗口）。越大越稳，越小越灵敏
+    driftObserveWindowSize:30,//窗口大小（滑动窗口）。越大越稳，越小越灵敏
     driftObserveStartStreak:5,//进入区间前，需要连续命中高阈值的点数（原来过大容易一个区间都进不去）
     driftObserveEndStreak:10,//退出区间前，需要连续命中低阈值的点数
-    driftObserveHighQuantile:0.60,//分位模式下的高阈值分位点
+    driftObserveHighQuantile:0.80,//分位模式下的高阈值分位点
     driftObserveLowQuantile:0.30,//分位模式下的低阈值分位点（建议小于高阈值分位）
 
     driftObserveBandRatioMin:0.35,//分布退化判据1：bandRatio 最小值
@@ -68,9 +68,13 @@ var config={
     driftObserveAbsAngleHigh:60,//fallback（固定角度模式）进入阈值（漂移抖动场景适当降低，避免“rawCount=0”）
     driftObserveAbsAngleLow:35,//fallback（固定角度模式）退出阈值（保持滞回，避免频繁抖动开关）
 
-    driftObserveMergeDistanceThresholdMeters:50,//区间合并：中心点距离阈值（米）
+    driftObserveMergeDistanceThresholdMeters:40,//区间合并：中心点距离阈值（米）
     driftObserveMergeGapMaxMinutes:30,//区间合并：区间间隔阈值（分钟）
-    driftObserveMinStopDurationMinutes:45,//区间保留：最短时长阈值（分钟）
+    driftObserveMinStopDurationMinutes:30,//区间保留：最短时长阈值（分钟）
+
+    // turnAngle 索引区间映射回 gpsPoints 时的边界微调（用于修复“区间尾部吞正常点”）
+    // 表示在映射后的 gpsEndIndex 上额外向前裁剪 N 个点（默认 5：与你目前观察到的固定吞点数量一致）。
+    driftObserveGpsEndTrim:10,
     
     driftObserveDensityScoreEnabled:true,//是否开启DBSCAN密度二次判定（关闭后所有时长过滤后的合并区间都直接保留为停留点）
     driftObserveDensityEpsMeters:15,//DBSCAN密度半径（米）
@@ -158,11 +162,13 @@ function parseGpsExtraPayload(p) {
  */
 function normalizeGpsPointsWithPayload(points) {
   if (!Array.isArray(points)) return points;
-  return points.map(point => {
+  return points.map((point, rawIndex) => {
     if (!point || typeof point !== "object") return point;
     const decoded = parseGpsExtraPayload(point.p);
     return {
       ...point,
+      // 稳定标识：用于诊断“吞点/替换”问题（即使后续被过滤，仍保留原始下标）
+      rawIndex: point.rawIndex ?? rawIndex,
       rawSpeed: decoded.rawSpeed,
       rawDirection: decoded.rawDirection,
       hdop: decoded.hdop,
@@ -844,7 +850,8 @@ function observeStopPointDirectionDrift(gpsPoints) {
     const startTime = startItem?.fromTime || startItem?.currentTime;
     const endTime = endItem?.toTime || endItem?.currentTime;
     const gpsStart = Math.max(0, start);
-    const gpsEnd = Math.min(gpsPoints.length - 1, end + 2);
+    const trim = Math.max(0, Number(config.driftObserveGpsEndTrim) || 0);
+    const gpsEnd = Math.min(gpsPoints.length - 1, Math.max(gpsStart, end - trim));
     let latSum = 0;
     let lngSum = 0;
     let count = 0;
@@ -1545,7 +1552,13 @@ function scoreStopIntervalsByDensity(mergedIntervals, gpsPoints, driftConfig) {
     const gpsStartIndex = Math.max(0, Math.min(gpsPoints.length - 1, interval.startIndex));
     const gpsEndIndex = Math.max(
       gpsStartIndex,
-      Math.min(gpsPoints.length - 1, interval.endIndex + 2)
+      Math.min(
+        gpsPoints.length - 1,
+        Math.max(
+          gpsStartIndex,
+          interval.endIndex - Math.max(0, Number(config.driftObserveGpsEndTrim) || 0)
+        )
+      )
     );
     const stopSegmentPoints = gpsPoints.slice(gpsStartIndex, gpsEndIndex + 1);
     const sampledPoints = samplePointsUniformly(
@@ -1587,13 +1600,14 @@ async function optimize(riginalGpsPoints) {
   var finalPoints = []; // 存储最终的轨迹点（混合语义：普通点保留，停留段替换成质心）
 
   // 这里我们完全改用 observeStopPointDirectionDrift 的 mergedDriftIntervals 做停留主参考。
-  // 注意索引映射：区间索引来自 turnAngleSeries，映射回 gpsPoints 时 endIndex 需要 +2。
+  // 注意索引映射：试验口径采用 turnAngleSeries 同索引边界，不再对 endIndex 做 +2 扩展。
   const normalizedDriftIntervals = (mergedDriftIntervals || [])
     .map((interval, index) => {
       const gpsStartIndex = Math.max(0, Math.min(gpsPoints.length - 1, interval.startIndex));
+      const trim = Math.max(0, Number(config.driftObserveGpsEndTrim) || 0);
       const gpsEndIndex = Math.max(
         gpsStartIndex,
-        Math.min(gpsPoints.length - 1, interval.endIndex + 2)
+        Math.min(gpsPoints.length - 1, Math.max(gpsStartIndex, interval.endIndex - trim))
       );
       return {
         intervalId: interval.id || index + 1,
@@ -1604,6 +1618,11 @@ async function optimize(riginalGpsPoints) {
       };
     })
     .sort((a, b) => a.gpsStartIndex - b.gpsStartIndex);
+
+  // --- 诊断：记录每个停留段“被替换掉”的 rawIndex，用于定位“额外吞点” ---
+  const stopReplaceRawIndexSet = new Set();
+  const stopReplaceDiag = [];
+  const stopTailReplacedPoints = [];
 
   let cursor = 0;
   for (const interval of normalizedDriftIntervals) {
@@ -1619,6 +1638,48 @@ async function optimize(riginalGpsPoints) {
       const stopSegmentPoints = gpsPoints.slice(segmentStart, segmentEnd + 1);
       if (stopSegmentPoints.length) {
         const centerPoint = calculateGeographicalCenter(stopSegmentPoints);
+        // 标记质心来源，便于前端/日志追踪
+        centerPoint.__isStopCentroid = true;
+        centerPoint.__stopIntervalId = interval.intervalId;
+        centerPoint.__stopGpsStartIndex = segmentStart;
+        centerPoint.__stopGpsEndIndex = segmentEnd;
+        centerPoint.__stopRawIndexStart = stopSegmentPoints[0]?.rawIndex ?? null;
+        centerPoint.__stopRawIndexEnd = stopSegmentPoints[stopSegmentPoints.length - 1]?.rawIndex ?? null;
+
+        // 收集“被替换掉”的原始点 rawIndex（这是预期消失的集合）
+        const rawIndices = [];
+        for (const p of stopSegmentPoints) {
+          if (p && Number.isFinite(p.rawIndex)) {
+            stopReplaceRawIndexSet.add(p.rawIndex);
+            rawIndices.push(p.rawIndex);
+          }
+        }
+
+        // 诊断增强：收集“停留段尾部被替换”的最后 N 个点（用于你这种‘尾部吞正常点’的可视化对照）
+        const tailN = Math.max(0, Number(config.driftObserveGpsEndTrim) || 0);
+        if (tailN > 0) {
+          const tail = stopSegmentPoints.slice(Math.max(0, stopSegmentPoints.length - tailN));
+          for (const p of tail) {
+            if (p && Number.isFinite(p.lng) && Number.isFinite(p.lat) && Number.isFinite(p.rawIndex)) {
+              stopTailReplacedPoints.push({
+                lng: p.lng,
+                lat: p.lat,
+                currentTime: p.currentTime,
+                rawIndex: p.rawIndex,
+                stopIntervalId: interval.intervalId
+              });
+            }
+          }
+        }
+
+        stopReplaceDiag.push({
+          intervalId: interval.intervalId,
+          gpsStartIndex: segmentStart,
+          gpsEndIndex: segmentEnd,
+          rawIndexStart: rawIndices.length ? Math.min(...rawIndices) : null,
+          rawIndexEnd: rawIndices.length ? Math.max(...rawIndices) : null,
+          replacedRawIndexCount: rawIndices.length
+        });
         finalPoints.push(centerPoint);
       }
       cursor = Math.max(cursor, segmentEnd + 1);
@@ -1628,6 +1689,76 @@ async function optimize(riginalGpsPoints) {
   // 把最后一个停留区间之后的普通点补回去。
   if (cursor < gpsPoints.length) {
     finalPoints.push(...gpsPoints.slice(cursor));
+  }
+
+  // --- 诊断：找出“不该消失”的 rawIndex（即额外吞点） ---
+  const allRawIndex = new Set();
+  const presentRawIndex = new Set();
+  for (const p of gpsPoints) {
+    if (p && Number.isFinite(p.rawIndex)) allRawIndex.add(p.rawIndex);
+  }
+  for (const p of finalPoints) {
+    if (p && Number.isFinite(p.rawIndex)) presentRawIndex.add(p.rawIndex);
+  }
+  const missingRawIndex = [];
+  for (const ri of allRawIndex) {
+    if (!presentRawIndex.has(ri)) missingRawIndex.push(ri);
+  }
+  missingRawIndex.sort((a, b) => a - b);
+  const unexpectedMissing = missingRawIndex.filter(ri => !stopReplaceRawIndexSet.has(ri));
+
+  const unexpectedMissingSet = new Set(unexpectedMissing);
+  const unexpectedMissingPoints = gpsPoints
+    .filter(p => p && Number.isFinite(p.rawIndex) && unexpectedMissingSet.has(p.rawIndex))
+    .map(p => ({
+      lng: p.lng,
+      lat: p.lat,
+      currentTime: p.currentTime,
+      rawIndex: p.rawIndex
+    }));
+  const swallowDebug = {
+    unexpectedMissingRawIndex: unexpectedMissing,
+    unexpectedMissingPoints,
+    stopReplaceDiag,
+    stopTailReplacedPoints,
+    stopTailReplacedCount: stopTailReplacedPoints.length,
+    gpsEndTrim: Math.max(0, Number(config.driftObserveGpsEndTrim) || 0)
+  };
+
+  if (config.openDebug) {
+    console.log("停留段替换诊断", {
+      gpsPointsCount: gpsPoints.length,
+      finalPointsCount: finalPoints.length,
+      stopIntervalCount: normalizedDriftIntervals.length,
+      expectedReplacedRawIndexCount: stopReplaceRawIndexSet.size,
+      missingRawIndexCount: missingRawIndex.length,
+      unexpectedMissingRawIndexCount: unexpectedMissing.length,
+      unexpectedMissingRawIndexHead: unexpectedMissing.slice(0, 30)
+    });
+    console.table(stopReplaceDiag);
+
+    // 进一步：按“每个区间结束后”统计紧邻尾部的异常缺失（用于验证“固定吞 5 个”）
+    const rawIndexByGpsIndex = gpsPoints.map(p => (p && Number.isFinite(p.rawIndex) ? p.rawIndex : null));
+    const tailRows = stopReplaceDiag.map(row => {
+      const after = [];
+      for (let k = 1; k <= 12; k++) {
+        const gi = row.gpsEndIndex + k;
+        if (gi >= 0 && gi < rawIndexByGpsIndex.length) {
+          const ri = rawIndexByGpsIndex[gi];
+          if (ri != null && unexpectedMissingSet.has(ri)) after.push(ri);
+        }
+      }
+      return {
+        intervalId: row.intervalId,
+        gpsEndIndex: row.gpsEndIndex,
+        unexpectedMissingAfterEndCount: after.length,
+        unexpectedMissingAfterEnd: after.slice(0, 12)
+      };
+    }).filter(r => r.unexpectedMissingAfterEndCount > 0);
+    if (tailRows.length) {
+      console.log("区间尾部额外吞点（end 后 12 点窗口）");
+      console.table(tailRows);
+    }
   }
   
   
@@ -1749,6 +1880,7 @@ async function optimize(riginalGpsPoints) {
   return {
     "turnAngleSeries":turnAngleSeries,
     driftObservationMeta,
+    swallowDebug,
     "finalPoints": finalPoints,//优化后的轨迹
     "trajectoryPoints":trajectoryPoints,//优化后根据速度进行拆分的轨迹信息
     "stopPoints" : stopPoints,//所有的停留点

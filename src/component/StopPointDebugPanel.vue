@@ -68,7 +68,7 @@
       </div>
 
       <div class="stoppoint-chart-card">
-        <div class="stoppoint-chart-title">规则阈值合并+30分钟过滤后区间（主参考）</div>
+        <div class="stoppoint-chart-title">规则阈值合并（主参考）</div>
         <div class="stoppoint-chart-box">
           <TurnAngleChart
             :data="turnAngleSeries"

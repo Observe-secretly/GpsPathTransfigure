@@ -7,6 +7,12 @@
     <StopPointDebugPanel :turnAngleSeries="turnAngleSeries" :driftObservationMeta="driftObservationMeta" />
 
     <div class="map-legend">
+      <div class="legend-item" style="display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" v-model="showSwallowDebug" />
+        <div class="legend-label" style="margin:0;">
+          吞点诊断（红点={{ swallowUnexpectedCount }}，橙点={{ stopTailReplacedCount }}，trim={{ gpsEndTrim }}）
+        </div>
+      </div>
       <div class="legend-item">
         <div class="legend-label">净平均速度</div>
         <div class="legend-value">{{ avgSpeed }} km/h</div>
@@ -77,6 +83,12 @@ let stopMarker = []
 
 const turnAngleSeries = ref([])
 const driftObservationMeta = ref(null)
+const swallowDebug = ref(null)
+const showSwallowDebug = ref(false)
+let swallowDebugMarkers = []
+const swallowUnexpectedCount = ref(0)
+const stopTailReplacedCount = ref(0)
+const gpsEndTrim = ref(0)
 
 const jsApiKey = import.meta.env.VITE_AMAP_JS_API_KEY;
 const webApiKey = import.meta.env.VITE_AMAP_WEB_API_KEY;
@@ -212,11 +224,11 @@ async function initMap() {
       defaultMapService: 'amap',
     })
     const staticPoints = await GpsPathTransfigure.optimize(pathParam);
-    debugger
     const {
       finalPoints,
       trajectoryPoints,
       stopPoints,
+      swallowDebug: swallow_debug,
       center,
       zoom,
       segmentInfo,
@@ -235,6 +247,14 @@ async function initMap() {
     totalMileage.value = parseFloat(mileage_total / 1000).toFixed(2)
     turnAngleSeries.value = Array.isArray(turn_angle_series) ? turn_angle_series : []
     driftObservationMeta.value = drift_observation_meta || null
+    swallowDebug.value = swallow_debug || null
+    swallowUnexpectedCount.value = Array.isArray(swallowDebug.value?.unexpectedMissingPoints)
+      ? swallowDebug.value.unexpectedMissingPoints.length
+      : 0
+    stopTailReplacedCount.value = Array.isArray(swallowDebug.value?.stopTailReplacedPoints)
+      ? swallowDebug.value.stopTailReplacedPoints.length
+      : 0
+    gpsEndTrim.value = Number.isFinite(swallowDebug.value?.gpsEndTrim) ? swallowDebug.value.gpsEndTrim : 0
 
     var map = new AMap.Map('amapContainer', {
       resizeEnable: true,
@@ -243,6 +263,41 @@ async function initMap() {
       zoom: zoom
     });
     mapInstance = map;
+
+    const hideSwallowDebugMarkers = () => {
+      swallowDebugMarkers.forEach(m => m && m.setMap && m.setMap(null))
+      swallowDebugMarkers = []
+    }
+    const showSwallowDebugMarkers = () => {
+      hideSwallowDebugMarkers()
+      const redPts = swallowDebug.value?.unexpectedMissingPoints
+      const orangePts = swallowDebug.value?.stopTailReplacedPoints
+      const hasRed = Array.isArray(redPts) && redPts.length
+      const hasOrange = Array.isArray(orangePts) && orangePts.length
+      if (!mapInstance || (!hasRed && !hasOrange)) return
+
+      ;(redPts || []).forEach(p => {
+        const marker = new AMap.Marker({
+          position: [p.lng, p.lat],
+          content: '<div style="width:8px;height:8px;background:#ff1a1a;border:2px solid #ffffff;border-radius:50%;box-shadow:0 0 6px rgba(255,0,0,0.6);"></div>',
+          offset: new AMap.Pixel(-6, -6),
+          title: `swallowed rawIndex=${p.rawIndex}${p.currentTime ? ` time=${p.currentTime}` : ''}`
+        })
+        marker.setMap(mapInstance)
+        swallowDebugMarkers.push(marker)
+      })
+
+      ;(orangePts || []).forEach(p => {
+        const marker = new AMap.Marker({
+          position: [p.lng, p.lat],
+          content: '<div style="width:8px;height:8px;background:#ff8c00;border:2px solid #ffffff;border-radius:50%;box-shadow:0 0 6px rgba(255,140,0,0.6);"></div>',
+          offset: new AMap.Pixel(-6, -6),
+          title: `stopTail replaced rawIndex=${p.rawIndex}${p.currentTime ? ` time=${p.currentTime}` : ''} interval=${p.stopIntervalId ?? ''}`
+        })
+        marker.setMap(mapInstance)
+        swallowDebugMarkers.push(marker)
+      })
+    }
 
     for (var i = 0; i < stopPoints.length; i += 1) {
       var stopPoint = stopPoints[i]
@@ -258,6 +313,11 @@ async function initMap() {
       });
       marker.setMap(map);
       stopMarker.push(marker)
+    }
+
+    // 初始化吞点诊断 marker（默认关闭）
+    if (showSwallowDebug.value) {
+      showSwallowDebugMarkers()
     }
 
     if (startPoint) {
@@ -388,6 +448,43 @@ async function initMap() {
     console.error('Fetch error:', error);
   }
 }
+
+watch(showSwallowDebug, () => {
+  if (!mapInstance) return
+  // 复用 initMap 里闭包函数不方便：这里简单重建/清理
+  if (!showSwallowDebug.value) {
+    swallowDebugMarkers.forEach(m => m && m.setMap && m.setMap(null))
+    swallowDebugMarkers = []
+    return
+  }
+  const redPts = swallowDebug.value?.unexpectedMissingPoints
+  const orangePts = swallowDebug.value?.stopTailReplacedPoints
+  const hasRed = Array.isArray(redPts) && redPts.length
+  const hasOrange = Array.isArray(orangePts) && orangePts.length
+  if (!hasRed && !hasOrange) return
+  swallowDebugMarkers.forEach(m => m && m.setMap && m.setMap(null))
+  swallowDebugMarkers = []
+  ;(redPts || []).forEach(p => {
+    const marker = new AMap.Marker({
+      position: [p.lng, p.lat],
+      content: '<div style="width:8px;height:8px;background:#ff1a1a;border:2px solid #ffffff;border-radius:50%;box-shadow:0 0 6px rgba(255,0,0,0.6);"></div>',
+      offset: new AMap.Pixel(-6, -6),
+      title: `swallowed rawIndex=${p.rawIndex}${p.currentTime ? ` time=${p.currentTime}` : ''}`
+    })
+    marker.setMap(mapInstance)
+    swallowDebugMarkers.push(marker)
+  })
+  ;(orangePts || []).forEach(p => {
+    const marker = new AMap.Marker({
+      position: [p.lng, p.lat],
+      content: '<div style="width:8px;height:8px;background:#ff8c00;border:2px solid #ffffff;border-radius:50%;box-shadow:0 0 6px rgba(255,140,0,0.6);"></div>',
+      offset: new AMap.Pixel(-6, -6),
+      title: `stopTail replaced rawIndex=${p.rawIndex}${p.currentTime ? ` time=${p.currentTime}` : ''} interval=${p.stopIntervalId ?? ''}`
+    })
+    marker.setMap(mapInstance)
+    swallowDebugMarkers.push(marker)
+  })
+})
 
 onMounted(async () => {
   //由于使用dom加载的地图，这里需要给一点时间让地图加载完成，不然可能会无法初始化地图. 实际开发中不必如此
